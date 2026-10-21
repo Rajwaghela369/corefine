@@ -27,7 +27,7 @@ def local_env(tmp_path, monkeypatch):
     from app.config import Settings
 
     # Empty env vars outrank backend/.env, so a filled-in .env never reaches the tests
-    cloud = ("AWS_", "DAYTONA_", "QDRANT_", "LANGFUSE_", "DATABASE_URL", "S3_")
+    cloud = ("AWS_", "DAYTONA_", "QDRANT_", "LANGFUSE_", "DATABASE_URL", "S3_", "MP_")
     for key in set(os.environ) | set(Settings.model_fields):
         if key.startswith(cloud):
             monkeypatch.setenv(key, "")
