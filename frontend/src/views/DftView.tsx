@@ -6,7 +6,8 @@ import { Button, Empty, Field, PanelHeader, Status, Tag, clock, cn, inputCls, nu
 import { RunsPane, livePollInterval, runIsLive } from "./DftRuns";
 import { ConvergencePane, EosPane, RamanPane } from "./DftStudies";
 import { Dot, Sections } from "../components/Sections";
-import { Atom, FileCode, LayoutDashboard, Play, ShieldCheck, Sigma, TrendingDown, Waves } from "lucide-react";
+import { Atom, FileCode, LayoutDashboard, Play, Search, ShieldCheck, Sigma, TrendingDown, Waves } from "lucide-react";
+import { Welcome, WelcomeSection } from "../components/Welcome";
 
 type SourceKind = "find" | "storage" | "mp" | "cod" | "upload";
 const SOURCE_TABS: { id: SourceKind; label: string }[] = [
@@ -19,15 +20,52 @@ export function DftView({ jobId, setJobId }: { jobId: string | null; setJobId: (
     <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
       <div className="min-h-0 border-r border-line"><DftForm onCreated={setJobId} selected={jobId} onSelect={setJobId} /></div>
       <div className="flex min-h-0 flex-col">
-        {jobId ? <JobWorkspace id={jobId} /> : (
-          <Empty title="No input set selected">
-            Choose a structure and settings on the left. CoRefine writes inputs for every configured code
-            (all-electron and pseudopotential), reads each one back as the code would, and checks they describe the
-            same crystal; installed codes then run here, with convergence and equation-of-state studies.
-          </Empty>
-        )}
+        {jobId ? <JobWorkspace id={jobId} /> : <DftWelcome onOpen={setJobId} />}
       </div>
     </div>
+  );
+}
+
+function DftWelcome({ onOpen }: { onOpen: (id: string) => void }) {
+  const cfg = useQuery({ queryKey: ["dft-config"], queryFn: dft.config });
+  const targets = useQuery({ queryKey: ["dft-targets"], queryFn: dft.targets });
+  const jobs = useQuery({ queryKey: ["dft-jobs"], queryFn: dft.jobs });
+  const runnable = new Set((targets.data ?? []).filter((t) => t.kind === "local").flatMap((t) => t.codes));
+  return (
+    <Welcome title="Theory: DFT for any material"
+      intro="Pick a material from Materials Project. CoRefine plans the calculation, writes inputs for every code below, checks that they all
+        describe the same crystal, runs the codes installed on this machine, and adds convergence, equation-of-state and Raman studies."
+      steps={[
+        { icon: Search, title: "Pick a material", text: "Search by formula or elements on the left; the stable phase is listed first." },
+        { icon: Play, title: "Plan and run", text: "The plan and its reasons are shown, inputs are checked, and installed codes run one after another." },
+        { icon: Sigma, title: "Study and compare", text: "Converge settings, fit an equation of state across codes, compute Raman lines, compare with experiment." },
+      ]}>
+      <WelcomeSection title={`Codes (${cfg.data?.codes.length ?? "…"})`}>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {(cfg.data?.codes ?? []).map((c) => (
+            <div key={c.name} className="rounded-lg border border-line bg-surface px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-semibold">{c.label}</span>
+                {runnable.has(c.name) ? <Tag tone="ok">runs here</Tag> : c.available ? <Tag>inputs only</Tag> : <Tag tone="warn">install</Tag>}
+              </div>
+              <div className="mt-0.5 text-[11.5px] text-muted">{c.method}</div>
+            </div>
+          ))}
+        </div>
+      </WelcomeSection>
+      {(jobs.data?.length ?? 0) > 0 && <WelcomeSection title="Recent sets">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {jobs.data!.slice(0, 6).map((j) => (
+            <button key={j.id} onClick={() => onOpen(j.id)} className="rounded-lg border border-line bg-surface px-3 py-2.5 text-left hover:border-accent">
+              <div className="flex items-center gap-2"><span className="text-[13px] font-semibold">{j.formula}</span>
+                <span className="text-[11.5px] text-muted">{j.functional} · k {j.kmesh.join("×")} · {j.codes.length} codes</span>
+                <span className="ml-auto">{j.passed ? <Tag tone="ok">checks passed</Tag> : <Tag tone="bad">{j.n_failed} failed</Tag>}</span></div>
+              <div className="mt-0.5 font-mono text-[11px] text-faint">{j.structure.split("/").pop()} · {clock(j.created)}</div>
+            </button>
+          ))}
+        </div>
+      </WelcomeSection>}
+    </Welcome>
   );
 }
 
@@ -123,7 +161,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
           <Field label="k-mesh (Γ-centred)">
             <div className="grid grid-cols-3 gap-1">
               {k.map((v, i) => <input key={i} type="number" min={1} max={24} className={cn(inputCls, "px-1.5 text-center font-mono",
-                kind === "find" && !kTouched && "text-muted")} value={v}
+                kind === "find" && !kTouched && "text-muted")} value={kind === "find" && !picked && !kTouched ? "" : v} placeholder="–"
                 onChange={(e) => { setKTouched(true); setK(k.map((x, j) => (j === i ? Math.max(1, Number(e.target.value) || 1) : x))); }} />)}
             </div>
             {kind === "find" && <div className="mt-1 text-[10.5px] leading-4 text-muted">
@@ -181,7 +219,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
 }
 
 function MaterialSearch({ picked, onPick }: { picked: MpMaterial | null; onPick: (m: MpMaterial) => void }) {
-  const [q, setQ] = useState("GaAs");
+  const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const res = useQuery({ queryKey: ["mp-search", query], queryFn: () => dft.searchMaterials(query), enabled: !!query });
   return (

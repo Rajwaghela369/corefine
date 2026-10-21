@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileClock, FileText, LayoutDashboard, LineChart, Table2, Workflow } from "lucide-react";
+import { Database, FileClock, FileText, LayoutDashboard, LineChart, Table2, Workflow } from "lucide-react";
+import { Welcome, WelcomeSection } from "../components/Welcome";
 import { useState } from "react";
 import { api, type RunDetail } from "../api/client";
 import { Dot, Sections } from "../components/Sections";
@@ -55,7 +56,7 @@ function XrdLab({ session, runId, setRunId, selected, toggle }: {
           onRunStarted={setRunId} history={<RunsList selected={runId} onSelect={setRunId} />} />
       </div>
       <div className="flex min-h-0 flex-col">
-        {!runId ? <Empty title="No analysis selected">Start an analysis on the left, or pick one from the history.</Empty>
+        {!runId ? <XrdWelcome onOpen={setRunId} />
           : run.isError ? <Empty title="Could not load the run">{String(run.error)}</Empty>
           : !run.data ? <Empty title="Loading…" />
           : <Workspace run={run.data} />}
@@ -143,6 +144,33 @@ function Workspace({ run }: { run: RunDetail }) {
           badge: run.claim_check ? <Dot tone={run.claim_check.passed ? "ok" : "bad"} /> : undefined },
       ]} />
     </div>
+  );
+}
+
+function XrdWelcome({ onOpen }: { onOpen: (id: string) => void }) {
+  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
+  return (
+    <Welcome title="Experiment: XRD refinement"
+      intro="Describe the analysis in plain language and pick the measured scan. Agents plan it, write and run the analysis code in a sandbox,
+        retry when code fails, and write a report in which every number is checked against the files the run produced."
+      steps={[
+        { icon: Database, title: "Choose data", text: "Select a measured pattern (and a reference structure) under Inputs; new data goes in Storage." },
+        { icon: Workflow, title: "Start the analysis", text: "Describe the goal or use the example; the plan and each step's code and log are shown live." },
+        { icon: FileText, title: "Read the result", text: "Refined values with uncertainties, the fitted scan, and a report whose numbers are all traced." },
+      ]}>
+      {(runs.data?.length ?? 0) > 0 && <WelcomeSection title="Recent analyses">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {runs.data!.slice(0, 6).map((r) => (
+            <button key={r.id} onClick={() => onOpen(r.id)} className="rounded-lg border border-line bg-surface px-3 py-2.5 text-left hover:border-accent">
+              <div className="flex items-center gap-2"><span className="font-mono text-[12px] font-semibold">{r.id}</span>
+                <span className="ml-auto"><Status status={r.status} /></span></div>
+              <p className="mt-0.5 line-clamp-1 text-[12px] text-ink-2">{r.prompt}</p>
+              {r.headline && <div className="mt-0.5 font-mono text-[11.5px] text-muted">a = {fixed(r.headline.a_refined)} Å</div>}
+            </button>
+          ))}
+        </div>
+      </WelcomeSection>}
+    </Welcome>
   );
 }
 
