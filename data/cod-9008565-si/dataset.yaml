@@ -1,0 +1,7 @@
+id: cod-9008565-si
+role: reference_structure
+technique: xrd_powder
+material: Si
+format: cif
+files: [raw/9008565.cif]
+source: https://www.crystallography.net/cod/9008565.html

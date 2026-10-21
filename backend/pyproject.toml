@@ -1,0 +1,57 @@
+[project]
+name = "corefine-backend"
+version = "0.1.0"
+description = "CoRefine backend: FastAPI + agent layer (Planner, Coder, Analyst, claim checker)"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "fastapi[standard]>=0.157",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.11",
+    "anthropic>=1.17",
+    "langchain-anthropic>=1.7",
+    "langgraph>=1.2",
+    "deepagents>=0.7",
+    "langfuse>=5.0",
+    "psycopg[binary]>=3.3",
+    "sqlalchemy>=2.1",
+    "boto3>=1.43",
+    "qdrant-client>=1.19",
+    "daytona>=0.225",
+    "httpx>=0.28",
+    # used by the backend itself (checks, CIF validation, manifests)
+    "numpy>=2.5",
+    "pandas>=3.0",
+    "gemmi>=0.7.5",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Local fallback embeddings, only if Qdrant Cloud inference is not on our plan
+embed = ["fastembed>=0.9"]
+
+[dependency-groups]
+dev = ["pytest>=9.1", "pytest-asyncio>=1.2", "ruff>=0.14"]
+# Same libraries the Daytona sandbox gets; used locally for the gold analysis
+science = [
+    "scipy>=1.18",
+    "matplotlib>=3.11",
+    "lmfit>=1.3.4",
+    "pymatgen>=2026.9.24",
+    "ase>=3.29",
+    "jupyterlab>=4.5",
+]
+
+[tool.uv]
+default-groups = ["dev", "science"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: hits real cloud services (skipped by default)"]
+addopts = "-m 'not integration'"
+
+[tool.ruff]
+line-length = 130
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

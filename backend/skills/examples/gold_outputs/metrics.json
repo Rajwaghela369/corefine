@@ -1,0 +1,51 @@
+[
+  {
+    "name": "a_refined",
+    "value": 5.430861673286418,
+    "unit": "angstrom",
+    "uncertainty": 3.476645151155397e-05,
+    "method": "weighted LSQ of pseudo-Voigt centres, a + zero shift"
+  },
+  {
+    "name": "zero_shift",
+    "value": -0.022488767257284853,
+    "unit": "degree",
+    "uncertainty": 0.0007034857577103516,
+    "method": "same fit"
+  },
+  {
+    "name": "wavelength",
+    "value": 1.5405929,
+    "unit": "angstrom",
+    "uncertainty": null,
+    "method": "manifest: NIST SRM 640f certificate (26 Feb 2019), Table 1"
+  },
+  {
+    "name": "scan_temperature",
+    "value": 20.455,
+    "unit": "degC",
+    "uncertainty": null,
+    "method": "file tag _pd_spec_temperature"
+  },
+  {
+    "name": "n_peaks",
+    "value": 11,
+    "unit": "count",
+    "uncertainty": null,
+    "method": "fitted reflections"
+  },
+  {
+    "name": "reduced_chi2_refinement",
+    "value": 13.475207649682392,
+    "unit": "dimensionless",
+    "uncertainty": null,
+    "method": "sum of squared normalised residuals / dof"
+  },
+  {
+    "name": "residual_slope",
+    "value": 4.817374287371451e-06,
+    "unit": "degree_per_degree",
+    "uncertainty": null,
+    "method": "linear fit of residual vs 2theta (trend check)"
+  }
+]

@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+@theme {
+  --color-ink: oklch(0.22 0.02 260);
+  --color-muted: oklch(0.55 0.02 260);
+  --color-line: oklch(0.91 0.01 260);
+  --color-panel: oklch(0.985 0.003 260);
+  --color-accent: oklch(0.55 0.17 255);
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-white text-ink antialiased; font-family: ui-sans-serif, system-ui, sans-serif; }
+
+.prose-report h1 { @apply text-lg font-semibold mb-2; }
+.prose-report h2 { @apply text-base font-semibold mt-4 mb-1; }
+.prose-report p, .prose-report li { @apply text-sm leading-6; }
+.prose-report ul { @apply list-disc pl-5; }
+.prose-report table { @apply text-xs border-collapse my-2; }
+.prose-report th, .prose-report td { @apply border border-line px-2 py-1; }
+.prose-report code { @apply bg-panel px-1 rounded text-xs; }
