@@ -116,6 +116,7 @@ export interface DftJob {
       set_explicitly: Record<string, string>; defaults: { source: string; values: Record<string, unknown> } }> };
   checks: { passed: boolean; results: DftCheck[]; reference: Record<string, any>; codes: Record<string, any> };
   runs: Record<string, DftRun>;
+  plan: DftPlan | null;
 }
 export interface DftCode { name: string; label: string; method: string; available: boolean; reason: string; functionals: string[] }
 export interface DftResults { converged: boolean | null; total_energy_eV: number | null; fermi_eV: number | null;
@@ -126,6 +127,11 @@ export interface DftTarget { name: string; kind: "local" | "slurm"; host: string
 export interface DftTool { name: string; label: string; license: string; size: string; source: string; installable: boolean;
   status: string; message: string; version: string | null }
 export interface DftTools { tools: DftTool[]; not_installable: Record<string, string>; code_tools: Record<string, string[]>; local: Record<string, string> }
+export interface MpMaterial { id: string; formula: string; nsites: number; spacegroup: string | null; e_above_hull_eV: number | null;
+  band_gap_eV: number | null; is_metal: boolean | null; ordering: string | null; stable: boolean; fits_laptop: boolean }
+export interface PlanDecision { field: string; value: string; reason: string; source: "user" | "rule" | "agent" | "materials_project" }
+export interface DftPlan { request: Record<string, unknown>; decisions: PlanDecision[]; warnings: string[]; blocked: string[];
+  planner: "rules" | "agent"; material?: MpMaterial; goal?: string | null }
 export interface DftJobBody { prompt?: string; structure?: string; codes?: string[]; functional?: string; kmesh?: number[] }
 
 export const dft = {
@@ -139,6 +145,10 @@ export const dft = {
   archiveUrl: (id: string) => `${API}/dft/jobs/${id}/archive`,
   targets: () => fetch(`${API}/dft/targets`).then(json<DftTarget[]>),
   tools: () => fetch(`${API}/dft/tools`).then(json<DftTools>),
+  searchMaterials: (q: string) => fetch(`${API}/dft/materials?q=${encodeURIComponent(q)}`).then(json<MpMaterial[]>),
+  workflow: (body: { material: string; goal?: string; functional?: string; kmesh?: number[] | null; codes?: string[] }) =>
+    fetch(`${API}/dft/workflow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(json<{ id: string; plan: DftPlan; runs: string[]; checks_passed: boolean }>),
   installTool: (name: string) => fetch(`${API}/dft/tools/${name}/install`, { method: "POST" }).then(json),
   startRun: (id: string, code: string, target: string) => fetch(`${API}/dft/jobs/${id}/runs`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, target }) }).then(json<DftRun>),

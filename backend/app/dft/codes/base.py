@@ -73,6 +73,11 @@ class CodeAdapter(ABC):
     def parse_results(self, rundir: Path) -> "Results | None":
         """Parse a finished (or stopped) run; None if no output is there yet."""
 
+    def heal(self, rundir: Path) -> dict | None:
+        """After a failed run: if the code's own output shows a known, fixable error, change the input and return
+        {"error": what the code said, "change": what was changed, "why": reason}; else None. Applied at most once."""
+        return None
+
     def local_env(self, s: Settings) -> dict[str, str]:
         """Extra environment the program needs when run on this server (e.g. library paths)."""
         return {}

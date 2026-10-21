@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.agents.llm import LLMError
 from app.config import get_settings
-from app.dft import execute, sources, structure, tools
+from app.dft import execute, materials, sources, structure, tools, workflow
 from app.dft.codes import REGISTRY
 from app.dft.codes.exciting import ExcitingSetupError
 from app.dft.codes.questaal import QuestaalSetupError
@@ -95,8 +95,11 @@ def list_jobs():
 def get_job(job_id: str):
     d = job_dir(job_id)
     files = sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file())
+    plan = json.loads((d / "plan.json").read_text()) if (d / "plan.json").is_file() else None
+    summary = json.loads((d / "summary.json").read_text()) if (d / "summary.json").is_file() else None
     return {"id": job_id, "provenance": json.loads((d / "provenance.json").read_text()),
-            "checks": json.loads((d / "checks.json").read_text()), "files": files, "runs": execute.all_states(d)}
+            "checks": json.loads((d / "checks.json").read_text()), "files": files, "runs": execute.all_states(d),
+            "plan": plan, "summary": summary}
 
 
 @router.get("/jobs/{job_id}/files/{path:path}")
@@ -202,3 +205,34 @@ def install_tool(name: str):
         return tools.install(name)
     except tools.ToolError as e:
         raise HTTPException(400, detail=str(e)) from e
+
+
+# --- materials and the end-to-end workflow -------------------------------------------
+
+@router.get("/materials")
+def search_materials(q: str, limit: int = 20):
+    """Materials Project search by formula ("GaAs") or elements ("Ga,As"); stable phases first."""
+    try:
+        return materials.search(q, limit=limit)
+    except materials.SearchError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+class WorkflowBody(BaseModel):
+    material: str                     # Materials Project id, e.g. mp-2534
+    goal: str | None = None           # plain-language goal for the planning agent (needs an Anthropic key)
+    functional: str = "PBE"
+    kmesh: tuple[int, int, int] | None = None
+    codes: list[str] | None = None
+    run: bool = True
+
+
+@router.post("/workflow")
+def start_workflow(body: WorkflowBody):
+    job_id = f"dft-{datetime.now(UTC):%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+    try:
+        out = workflow.start(jobs_dir() / job_id, body.material.removeprefix("mp:"), body.goal, body.functional,
+                             body.kmesh, body.codes, body.run)
+    except (*SETUP_ERRORS, materials.SearchError) as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return {"id": job_id, "plan": out["plan"].model_dump(), "runs": out["runs"], "checks_passed": out["checks_passed"]}

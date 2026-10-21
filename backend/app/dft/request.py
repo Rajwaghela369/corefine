@@ -20,6 +20,9 @@ class CalcRequest(BaseModel):
                                          "empty = every code available on this server")
     functional: Functional = Field(default="PBE", description="Exchange-correlation functional")
     kmesh: tuple[int, int, int] = Field(default=(2, 2, 2), description="Monkhorst-Pack style k-mesh, e.g. 2 2 2")
+    occupations: Literal["auto", "fixed", "smearing"] = Field(
+        default="auto", description="auto = each code's default (QE retries with smearing if it reports a metal); "
+                                    "smearing = request smearing up front (metals)")
     task: Literal["groundstate"] = Field(default="groundstate", description="Only ground-state SCF for now")
     notes: str = Field(default="", description="Anything in the request that could not be expressed in the fields above")
 

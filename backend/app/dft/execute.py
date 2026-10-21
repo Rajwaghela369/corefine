@@ -144,10 +144,10 @@ def start(set_dir: Path, code: str, target_name: str, wait: bool = False) -> dic
     if code_cfg is None:
         raise ComputeConfigError(f"target {target_name} has no entry for {code}")
     st = read_state(set_dir, code)
-    if st and st.get("status") not in TERMINAL | {None}:
+    if st and st.get("status") not in TERMINAL | {None, "waiting"}:  # waiting = queued behind other codes by a workflow
         raise ComputeConfigError(f"{code} is already {st['status']} on {st.get('target')}")
     write_state(set_dir, code, target=target_name, kind=target["kind"], status="queued", started=now(),
-                finished=None, message="", results=None, attempts=0, remote_job_id=None)
+                finished=None, message="", results=None, attempts=0, remote_job_id=None, healed=None)
     runner = _run_local if target["kind"] == "local" else _run_slurm
     if wait:
         runner(set_dir, code, adapter, target, code_cfg)
@@ -184,9 +184,19 @@ def _run_local(set_dir: Path, code: str, adapter: CodeAdapter, target: dict, cod
                 p = subprocess.run([*launcher, exe, *spec["args"]], cwd=rundir, env=env, stdout=out, stderr=subprocess.STDOUT,
                                    timeout=timeout)
             res = adapter.parse_results(rundir)
+            if p.returncode != 0 and not (read_state(set_dir, code) or {}).get("healed"):
+                fix = adapter.heal(rundir)
+                if fix:  # the code's own error names a known fix: apply it once and run again
+                    write_state(set_dir, code, healed=fix, message=f"retrying after: {fix['error']}")
+                    with open(rundir / spec["stdout"], "w") as out:
+                        p = subprocess.run([*launcher, exe, *spec["args"]], cwd=rundir, env=env, stdout=out,
+                                           stderr=subprocess.STDOUT, timeout=timeout)
+                    res = adapter.parse_results(rundir)
             if p.returncode != 0 or res is None or res.converged is not False:
                 break
-        _finish(set_dir, code, adapter, p.returncode == 0, f"exit code {p.returncode}" if p.returncode else "")
+        healed = (read_state(set_dir, code) or {}).get("healed")
+        note = f"healed: {healed['change']}" if healed and p.returncode == 0 else ""
+        _finish(set_dir, code, adapter, p.returncode == 0, f"exit code {p.returncode}" if p.returncode else note)
     except subprocess.TimeoutExpired:
         write_state(set_dir, code, status="failed", finished=now(), message="timed out")
     except Exception as e:  # noqa: BLE001 — a run must end in a recorded state

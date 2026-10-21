@@ -133,6 +133,26 @@ codes: formula, space group, volume per atom, nearest-neighbour distance, k-mesh
 each code's own checks (exciting: schema validation; Questaal: `lmchk` symmetry and sphere overlap).
 Output: one folder per code, plus `checks.json`, `provenance.json` and `SUMMARY.md`, downloadable as a zip.
 
+### From a material name to results
+
+Lab → DFT inputs → **Find material**: search Materials Project by formula (`GaAs`, `TiO2`) or elements
+(`Ga,As`); stable phases come first (energy above hull from MP's public OPTIMADE endpoint, no key).
+Pick one and **Plan and run**:
+
+1. **Plan**: every decision is a typed field with a reason and a source (user, rule, Materials Project,
+   or Claude). Rules: PBE; Γ-centred k-mesh from a 0.3 Å⁻¹ k-point spacing; smearing for metals that MP
+   marks as metallic; magnetic ground states are refused until spin polarisation is supported. With an
+   Anthropic key and a goal ("quick check", "accurate gap") Claude may adjust functional, k-mesh, codes or
+   occupations within limits; it never writes input files.
+2. **Inputs + checks** for every selected code, as before.
+3. **Runs**: each code installed here runs in turn (one at a time, to spare memory). If a code stops
+   with a known error, its adapter applies the documented fix once (QE: `smearing is needed` → smearing).
+4. **Summary**: results side by side (`summary.json`), with MP's PBE band gap as reference when an
+   MP API key is set.
+
+Tested end to end on Si, C, GaAs, MgO, NaCl, LiF, Al, GaN, Cu and ZnO (inputs and checks for all four
+codes; Quantum ESPRESSO runs locally for all ten, metals via the smearing fix).
+
 ### Codes for people who have nothing installed
 
 The DFT panel offers one-click installs of open-source codes and their data, into

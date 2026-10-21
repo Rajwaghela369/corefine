@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, dft, type DftJob } from "../api/client";
+import { api, dft, type DftJob, type MpMaterial } from "../api/client";
 import { Quadrants } from "../components/Quadrants";
 import { Button, Empty, Field, PanelHeader, Tag, clock, cn, inputCls, num } from "../components/ui";
 import { RunsPane, livePollInterval } from "./DftRuns";
 
-type SourceKind = "storage" | "mp" | "cod" | "upload";
+type SourceKind = "find" | "storage" | "mp" | "cod" | "upload";
 const SOURCE_TABS: { id: SourceKind; label: string }[] = [
-  { id: "storage", label: "Storage" }, { id: "mp", label: "Materials Project" }, { id: "cod", label: "COD" }, { id: "upload", label: "Upload CIF" },
+  { id: "find", label: "Find material" }, { id: "storage", label: "Storage" }, { id: "mp", label: "MP id" },
+  { id: "cod", label: "COD" }, { id: "upload", label: "CIF" },
 ];
 
 export function DftView({ jobId, setJobId }: { jobId: string | null; setJobId: (id: string) => void }) {
@@ -32,7 +33,10 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
   const cfg = useQuery({ queryKey: ["dft-config"], queryFn: dft.config });
   const datasets = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
   const structures = (datasets.data ?? []).filter((d) => d.valid && d.role === "reference_structure");
-  const [kind, setKind] = useState<SourceKind>("storage");
+  const [kind, setKind] = useState<SourceKind>("find");
+  const [picked, setPicked] = useState<MpMaterial | null>(null);
+  const [autoK, setAutoK] = useState(true);
+  const [goal, setGoal] = useState("");
   const [ds, setDs] = useState("");
   const [mp, setMp] = useState("mp-149");
   const [cod, setCod] = useState("9008565");
@@ -46,11 +50,17 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const source = kind === "storage" ? (ds || structures[0]?.id ? `dataset:${ds || structures[0]?.id}` : "")
+  const source = kind === "find" ? (picked ? `mp:${picked.id}` : "") : kind === "storage" ? (ds || structures[0]?.id ? `dataset:${ds || structures[0]?.id}` : "")
     : kind === "mp" ? (mp.trim() ? `mp:${mp.trim().replace(/^mp:/, "")}` : "")
     : kind === "cod" ? (cod.trim() ? `cod:${cod.trim().replace(/^cod:/, "")}` : "")
     : uploaded?.structure ?? "";
 
+  const wf = useMutation({
+    mutationFn: () => dft.workflow({ material: picked!.id, functional: xc, kmesh: autoK ? null : k, codes,
+      goal: goal.trim() || undefined }),
+    onSuccess: (r) => { setError(null); qc.invalidateQueries({ queryKey: ["dft-jobs"] }); onCreated(r.id); },
+    onError: (e) => setError(e instanceof Error ? e.message : String(e)),
+  });
   const create = useMutation({
     mutationFn: (usePrompt: boolean) => dft.create(usePrompt ? { prompt } : { structure: source, functional: xc, kmesh: k, codes }),
     onSuccess: (r) => { setError(null); qc.invalidateQueries({ queryKey: ["dft-jobs"] }); onCreated(r.id); },
@@ -71,12 +81,13 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
       <div className="space-y-4 overflow-auto border-b border-line p-4">
         <div>
           <div className="mb-1.5 text-xs font-medium text-ink-2">Structure</div>
-          <div className="mb-2 grid grid-cols-4 rounded-md border border-line-strong p-0.5">
+          <div className="mb-2 grid grid-cols-5 rounded-md border border-line-strong p-0.5">
             {SOURCE_TABS.map((t) => (
               <button key={t.id} onClick={() => setKind(t.id)} className={cn("rounded px-1 py-1 text-[11px]",
                 kind === t.id ? "bg-ink text-white" : "text-muted hover:text-ink")}>{t.label}</button>
             ))}
           </div>
+          {kind === "find" && <MaterialSearch picked={picked} onPick={setPicked} />}
           {kind === "storage" && (structures.length
             ? <select className={inputCls} value={ds || structures[0].id} onChange={(e) => setDs(e.target.value)}>
                 {structures.map((d) => <option key={d.id} value={d.id}>{d.id}</option>)}</select>
@@ -101,8 +112,10 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
               <option>PBE</option><option>PBEsol</option><option>LDA</option>
             </select>
           </Field>
-          <Field label="k-mesh">
-            <div className="grid grid-cols-3 gap-1">
+          <Field label={kind === "find" ? "k-mesh" : "k-mesh"}>
+            {kind === "find" && <label className="mb-1 flex items-center gap-1.5 text-[11px] text-muted">
+              <input type="checkbox" checked={autoK} onChange={(e) => setAutoK(e.target.checked)} /> from k-point spacing (planner)</label>}
+            <div className={cn("grid grid-cols-3 gap-1", kind === "find" && autoK && "pointer-events-none opacity-40")}>
               {k.map((v, i) => <input key={i} type="number" min={1} max={24} className={cn(inputCls, "px-1.5 text-center font-mono")} value={v}
                 onChange={(e) => setK(k.map((x, j) => (j === i ? Math.max(1, Number(e.target.value) || 1) : x)))} />)}
             </div>
@@ -126,9 +139,17 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
           </div>
         </div>
         <p className="text-[11px] leading-4 text-muted">Everything else stays at each code's documented defaults; the generated set lists them.</p>
-        <Button variant="primary" className="w-full" disabled={!source || !codes.length || create.isPending} onClick={() => create.mutate(false)}>
+        {kind === "find" ? <>
+          <textarea className={cn(inputCls, "h-12 py-1.5")} value={goal} onChange={(e) => setGoal(e.target.value)}
+            placeholder="Goal for the planning agent (optional), e.g. quick check of the band gap" />
+          <Button variant="primary" className="w-full" disabled={!picked || !codes.length || wf.isPending} onClick={() => wf.mutate()}>
+            {wf.isPending ? "Planning and writing inputs…" : picked ? `Plan and run ${picked.formula} (${picked.id})` : "Pick a material first"}
+          </Button>
+          <p className="text-[11px] leading-4 text-muted">Plans the calculation, writes and checks inputs for every selected code,
+            then runs each code that is installed here, one after another.</p>
+        </> : <Button variant="primary" className="w-full" disabled={!source || !codes.length || create.isPending} onClick={() => create.mutate(false)}>
           {create.isPending ? "Generating and checking…" : "Generate inputs"}
-        </Button>
+        </Button>}
 
         <details className="rounded-md border border-line">
           <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-ink-2">Or describe it in words</summary>
@@ -144,6 +165,39 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
       </div>
       <div className="flex h-9 shrink-0 items-center border-b border-line px-4 text-xs font-medium">Generated sets</div>
       <div className="min-h-0 flex-1 overflow-auto"><JobList selected={selected} onSelect={onSelect} /></div>
+    </div>
+  );
+}
+
+function MaterialSearch({ picked, onPick }: { picked: MpMaterial | null; onPick: (m: MpMaterial) => void }) {
+  const [q, setQ] = useState("GaAs");
+  const [query, setQuery] = useState("");
+  const res = useQuery({ queryKey: ["mp-search", query], queryFn: () => dft.searchMaterials(query), enabled: !!query });
+  return (
+    <div>
+      <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
+        <input className={cn(inputCls, "font-mono")} value={q} onChange={(e) => setQ(e.target.value)} placeholder="GaAs, TiO2, or Ga,As" />
+        <Button size="md" variant="secondary" type="submit">Search</Button>
+      </form>
+      <p className="mt-1 text-[10.5px] text-muted">Materials Project, stable phases first. Formula or elements.</p>
+      {res.isFetching && <p className="mt-2 text-[11px] text-muted">Searching…</p>}
+      {res.isError && <p className="mt-2 text-[11px] text-bad">{String(res.error instanceof Error ? res.error.message : res.error)}</p>}
+      {res.data && <ul className="mt-2 max-h-56 divide-y divide-line overflow-auto rounded-md border border-line">
+        {res.data.length === 0 && <li className="px-2.5 py-2 text-[11px] text-muted">No match.</li>}
+        {res.data.map((m) => (
+          <li key={m.id}>
+            <button onClick={() => onPick(m)} className={cn("flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-subtle",
+              picked?.id === m.id && "bg-accent-soft hover:bg-accent-soft")}>
+              <span className="w-[74px] shrink-0 font-mono text-[11px]">{m.id}</span>
+              <span className="min-w-0 flex-1 truncate text-[11.5px]">{m.formula} <span className="text-muted">{m.spacegroup}</span></span>
+              <span className="shrink-0 text-[10.5px] text-muted">{m.nsites} at.</span>
+              {m.stable ? <Tag tone="ok">stable</Tag>
+                : <span className="w-[62px] shrink-0 text-right font-mono text-[10.5px] text-muted" title="energy above hull (eV/atom)">
+                  +{m.e_above_hull_eV?.toFixed(3)}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>}
     </div>
   );
 }
@@ -259,6 +313,29 @@ function Cellv({ label, value, mono }: { label: string; value: string; mono?: bo
   );
 }
 
+function PlanBlock({ job }: { job: DftJob }) {
+  const plan = job.plan;
+  if (!plan) return null;
+  const tone = { user: "neutral", rule: "neutral", agent: "run", materials_project: "ok" } as const;
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-2 font-medium text-ink-2">Plan
+        <Tag tone={plan.planner === "agent" ? "run" : "neutral"}>{plan.planner === "agent" ? "planned with Claude" : "rule-based planner"}</Tag></div>
+      {plan.goal && <p className="mb-1 text-muted">Goal: {plan.goal}</p>}
+      <table className="w-full">
+        <tbody className="divide-y divide-line">
+          {plan.decisions.map((d, i) => (
+            <tr key={i} className="align-top"><td className="w-24 py-1 text-muted">{d.field}</td>
+              <td className="py-1"><span className="font-mono">{d.value}</span> <Tag tone={tone[d.source]}>{d.source.replace("_", " ")}</Tag>
+                <div className="text-[11px] text-muted">{d.reason}</div></td></tr>
+          ))}
+        </tbody>
+      </table>
+      {plan.warnings.map((w) => <p key={w} className="mt-1 rounded bg-warn-soft px-2 py-1 text-warn">{w}</p>)}
+    </div>
+  );
+}
+
 function StructurePane({ job }: { job: DftJob }) {
   const p = job.provenance;
   const ref = job.checks.reference;
@@ -269,6 +346,7 @@ function StructurePane({ job }: { job: DftJob }) {
   ];
   return (
     <div className="space-y-4 p-4 text-xs">
+      <PlanBlock job={job} />
       <dl className="grid grid-cols-[120px_1fr] gap-y-1.5">
         <dt className="text-muted">Source</dt><dd className="font-mono">{p.source.source.split("/").pop()}</dd>
         {p.source.url && <><dt className="text-muted">URL</dt><dd className="truncate"><a className="text-accent hover:underline" href={p.source.url} target="_blank" rel="noreferrer">{p.source.url} <ExternalLink size={10} className="inline" /></a></dd></>}

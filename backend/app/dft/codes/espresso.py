@@ -24,6 +24,10 @@ from app.dft.request import CalcRequest
 from app.dft.structure import Cell
 
 EV_PER_RY = 13.605693122994
+# Used only when pw.x itself stops with "smearing is needed" (a metal run with the default fixed occupations).
+# pw.x has no default smearing width; this is CoRefine's choice and is recorded with every run that uses it.
+METAL_SMEARING = {"occupations": "smearing", "smearing": "mv", "degauss": 0.01}
+SMEARING_NOTE = "smearing, Marzari-Vanderbilt, 0.01 Ry (CoRefine's choice)"
 
 
 class EspressoSetupError(RuntimeError):
@@ -153,17 +157,19 @@ class EspressoAdapter(CodeAdapter):
         ecutwfc, ecutrho = max(wfc), max(rho)
         input_data = {"control": {"calculation": "scf", "prefix": "pwscf", "pseudo_dir": "./", "outdir": "./tmp",
                                   "title": title[:70]},
-                      "system": {"ecutwfc": ecutwfc, "ecutrho": ecutrho}}
+                      "system": {"ecutwfc": ecutwfc, "ecutrho": ecutrho,
+                                 **(METAL_SMEARING if req.occupations == "smearing" else {})}}
         with open(outdir / "pw.in", "w") as fd:
             ase_write(fd, cell.atoms, format="espresso-in", input_data=input_data,
                       pseudopotentials={el: p.name for el, p in pseudos.items()}, kpts=tuple(req.kmesh), koffset=(0, 0, 0),
                       crystal_coordinates=True)
         return {"files": sorted(f.name for f in outdir.iterdir()),
                 "set_explicitly": {"K_POINTS": f"automatic {' '.join(map(str, req.kmesh))} 0 0 0 (Gamma-centred)",
-                                   "functional": f"{req.functional}, via the pseudopotentials"},
+                                   "functional": f"{req.functional}, via the pseudopotentials",
+                                   **({"occupations": SMEARING_NOTE} if req.occupations == "smearing" else {})},
                 "defaults": {"source": f"pw.x defaults; cutoffs from {source}",
-                             "values": {"ecutwfc_Ry": ecutwfc, "ecutrho_Ry": ecutrho, "occupations": "fixed (pw.x default)",
-                                        "conv_thr": "1e-6 (pw.x default)"}},
+                             "values": {"ecutwfc_Ry": ecutwfc, "ecutrho_Ry": ecutrho, "conv_thr": "1e-6 (pw.x default)",
+                                        **({} if req.occupations == "smearing" else {"occupations": "fixed (pw.x default)"})}},
                 "pseudopotentials": {el: p.name for el, p in pseudos.items()}, "pseudo_dir": str(pdir),
                 "pseudo_md5": {p.name: (sssp.get("table", {}).get(el) or {}).get("md5") for el, p in pseudos.items()}}
 
@@ -212,3 +218,21 @@ class EspressoAdapter(CodeAdapter):
                        gap_eV=float(homo.group(2)) - float(homo.group(1)) if homo else None,
                        scf_iterations=int(conv.group(1)) if conv else None,
                        warnings=[] if conv else ["pw.x did not report convergence"])
+
+    def heal(self, rundir: Path) -> dict | None:
+        out = rundir / "pw.out"
+        text = out.read_text(errors="replace") if out.is_file() else ""
+        if "smearing is needed" not in text:
+            return None
+        pw = rundir / "pw.in"
+        src = pw.read_text()
+        if "occupations" in src:
+            return None
+        lines = [f"   {k:16s} = {repr(v) if isinstance(v, str) else v}" for k, v in METAL_SMEARING.items()]
+        healed = re.sub(r"(&SYSTEM\b[^\n]*\n)", lambda m: m.group(1) + "\n".join(lines) + "\n", src, count=1, flags=re.I)
+        if healed == src:
+            return None
+        pw.write_text(healed)
+        return {"error": "pw.x: charge is wrong: smearing is needed (the system is metallic)",
+                "change": "occupations='smearing', smearing='mv' (Marzari-Vanderbilt), degauss=0.01 Ry",
+                "why": "pw.x defaults to fixed occupations, which cannot describe a metal; 0.01 Ry is CoRefine's choice"}
