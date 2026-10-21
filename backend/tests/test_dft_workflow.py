@@ -102,3 +102,17 @@ def test_workflow_prepares_inputs_without_running(tmp_path, monkeypatch):
 from conftest import SEED  # noqa: E402
 
 SEED_CIF = SEED / "cod-9008565-si" / "raw" / "9008565.cif"
+
+
+def test_mp_id_forms_map_to_the_same_number():
+    assert materials.mp_number("mp-149") == materials.mp_number("mp-aaaaaaft") == 149
+    assert materials.mp_number("mp-aaaaadtm") == 2534 and materials.mp_number("mp-aaaaaaan") == 13
+    assert materials.mp_number("mp-?") is None
+
+
+def test_planner_uses_is_magnetic():
+    nm = planner.rule_plan({"id": "mp-149", "nsites": 2, "ordering": "Unknown", "is_magnetic": False}, SI.cell[:])
+    assert not nm.blocked and not any("magnetic ordering unknown" in w for w in nm.warnings)
+    assert any(d.field == "spin" and d.source == "materials_project" for d in nm.decisions)
+    mag = planner.rule_plan({"id": "mp-x", "nsites": 1, "ordering": "Unknown", "is_magnetic": True}, SI.cell[:])
+    assert mag.blocked

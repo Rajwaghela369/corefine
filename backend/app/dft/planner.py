@@ -71,7 +71,12 @@ def rule_plan(material: dict, lattice: np.ndarray, functional: str = "PBE", kmes
     if material.get("ordering") in MAGNETIC:
         blocked.append(f"Materials Project lists a {material['ordering']} magnetic ground state; spin-polarised "
                        "calculations are not supported yet, and a non-magnetic run would describe the wrong state")
-    elif material.get("ordering") is None:
+    elif material.get("is_magnetic") is False:
+        d.append(Decision(field="spin", value="non-spin-polarised", source="materials_project",
+                          reason="Materials Project lists the material as non-magnetic"))
+    elif material.get("is_magnetic") is True:
+        blocked.append("Materials Project lists the material as magnetic; spin-polarised calculations are not supported yet")
+    else:
         warnings.append("magnetic ordering unknown (needs a Materials Project API key); the run is non-spin-polarised")
     if material.get("nsites", 0) > LAPTOP_SITES:
         warnings.append(f"{material['nsites']} atoms in the cell: expect long runs and high memory on a laptop")

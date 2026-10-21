@@ -83,22 +83,37 @@ def search(query: str, limit: int = 25, max_sites: int = 40) -> list[dict]:
     return out[:limit]
 
 
+def mp_number(material_id: str) -> int | None:
+    """Both Materials Project id forms as one integer: legacy 'mp-149' and the current API's 'mp-aaaaaaft'
+    (the same number written in base 26 with a=0 ... z=25; checked: aaaaaaft=149, aaaaadtm=2534, aaaaaaan=13)."""
+    body = material_id.removeprefix("mp-")
+    if body.isdigit():
+        return int(body)
+    if body.isalpha() and body.islower():
+        n = 0
+        for ch in body:
+            n = n * 26 + (ord(ch) - ord("a"))
+        return n
+    return None
+
+
 def _add_summary(entries: list[dict]) -> None:
-    """Band gap / metal / magnetic ordering from the official API, only when MP_API_KEY is set."""
+    """Band gap, metal flag and magnetism from the official API, only when MP_API_KEY is set."""
     key = get_settings().MP_API_KEY
     if not key or not entries:
         return
     ids = ",".join(e["id"] for e in entries)
-    r = httpx.get(MP_SUMMARY, params={"material_ids": ids, "_fields": "material_id,band_gap,is_metal,ordering",
+    r = httpx.get(MP_SUMMARY, params={"material_ids": ids, "_fields": "material_id,band_gap,is_metal,ordering,is_magnetic",
                                       "_limit": len(entries)},
                   headers={"X-API-KEY": key}, timeout=TIMEOUT)
     if r.status_code != 200:
         return
-    by_id = {d["material_id"]: d for d in r.json().get("data", [])}
+    by_number = {mp_number(d["material_id"]): d for d in r.json().get("data", [])}
     for e in entries:
-        d = by_id.get(e["id"])
+        d = by_number.get(mp_number(e["id"]))
         if d:
-            e.update(band_gap_eV=d.get("band_gap"), is_metal=d.get("is_metal"), ordering=d.get("ordering"))
+            e.update(band_gap_eV=d.get("band_gap"), is_metal=d.get("is_metal"), ordering=d.get("ordering"),
+                     is_magnetic=d.get("is_magnetic"))
 
 
 def get(mp_id: str) -> dict:
