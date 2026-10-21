@@ -183,11 +183,11 @@ def test_slurm_flow_with_fake_cluster(tmp_path, monkeypatch):
 
 def test_unknown_target_and_missing_code_entry(tmp_path, monkeypatch):
     write_compute(tmp_path, monkeypatch, {"local": {"kind": "local", "codes": {}}})
-    (tmp_path / "set" / "questaal").mkdir(parents=True)
+    (tmp_path / "set" / "vasp").mkdir(parents=True)
     with pytest.raises(execute.ComputeConfigError, match="unknown compute target"):
-        execute.start(tmp_path / "set", "questaal", "nope")
-    with pytest.raises(execute.ComputeConfigError, match="no entry for questaal"):
-        execute.start(tmp_path / "set", "questaal", "local")
+        execute.start(tmp_path / "set", "vasp", "nope")
+    with pytest.raises(execute.ComputeConfigError, match="no entry for vasp"):  # no VASP executable anywhere
+        execute.start(tmp_path / "set", "vasp", "local")
 
 
 def test_targets_listing_marks_remote_as_needing_confirmation(tmp_path, monkeypatch):
@@ -217,4 +217,4 @@ def test_api_import_results_and_runs_in_job(seeded, no_index, tmp_path, monkeypa
         bad = c.post(f"/dft/jobs/{job['id']}/runs/vasp/import", files=[("files", ("notes.txt", b"hello", "text/plain"))])
         assert bad.status_code == 400
         assert c.post(f"/dft/jobs/{job['id']}/runs", json={"code": "exciting", "target": "nope"}).status_code == 400
-        assert c.get("/dft/targets").json() == []
+        assert all(t["kind"] == "local" for t in c.get("/dft/targets").json())  # only the implicit local target

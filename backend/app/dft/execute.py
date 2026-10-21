@@ -13,6 +13,7 @@ come only from the code's own output files, parsed by the code adapter.
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import threading
 import time
@@ -43,12 +44,35 @@ def now() -> str:
 
 # --- configuration -----------------------------------------------------------
 
+def local_executables() -> dict[str, str]:
+    """Codes runnable on this machine without any configuration: installed by CoRefine, configured paths, or on PATH."""
+    from app.dft import tools
+
+    s = get_settings()
+    found = {}
+    for code, adapter in REGISTRY.items():
+        exe = tools.managed_executable(code)
+        if exe is None and code == "questaal" and s.QUESTAAL_BIN and (s.QUESTAAL_BIN / "lmf").is_file():
+            exe = s.QUESTAAL_BIN / "lmf"
+        if exe is None and code == "exciting" and s.EXCITING_BIN and s.EXCITING_BIN.is_file():
+            exe = s.EXCITING_BIN
+        if exe is None and (w := shutil.which(adapter.program)):
+            exe = Path(w)
+        if exe is not None:
+            found[code] = str(exe)
+    return found
+
+
 def load_targets() -> dict[str, dict]:
+    """Targets from compute.yaml, plus an implicit `local` target for every code found on this machine."""
     path = get_settings().COMPUTE_CONFIG
-    if not path.is_file():
-        return {}
-    data = yaml.safe_load(path.read_text()) or {}
-    targets = data.get("targets") or {}
+    data = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
+    targets = dict(data.get("targets") or {})
+    implicit = {code: {"executable": exe} for code, exe in local_executables().items()}
+    if implicit:
+        local = dict(targets.get("local") or {"kind": "local", "threads": 1})
+        local["codes"] = {**implicit, **(local.get("codes") or {})}
+        targets["local"] = local
     for name, t in targets.items():
         if t.get("kind") not in ("local", "slurm"):
             raise ComputeConfigError(f"target {name}: kind must be local or slurm")

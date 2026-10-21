@@ -29,6 +29,7 @@ def local_env(tmp_path, monkeypatch):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("COREFINE_MODE", "local")
     monkeypatch.setenv("LOCAL_DATA_DIR", str(tmp_path / "local"))
+    monkeypatch.setenv("TOOLS_DIR", str(tmp_path / "tools"))  # never see codes installed on the dev machine
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("LLM_SERVER_FALLBACKS", "false")
     _clear_caches()

@@ -13,6 +13,7 @@ const STATUS_MAP: Record<string, string> = { staging: "running", submitted: "que
 export function RunsPane({ job }: { job: DftJob }) {
   const qc = useQueryClient();
   const targets = useQuery({ queryKey: ["dft-targets"], queryFn: dft.targets });
+  const tools = useQuery({ queryKey: ["dft-tools"], queryFn: dft.tools });
   const codes = Object.keys(job.provenance.generated);
   const [confirm, setConfirm] = useState<{ code: string; target: DftTarget } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +29,7 @@ export function RunsPane({ job }: { job: DftJob }) {
     <div className="flex h-full flex-col">
       <ul className="min-h-0 flex-1 divide-y divide-line overflow-auto">
         {codes.map((code) => <Row key={code} job={job} code={code} targets={(targets.data ?? []).filter((t) => t.codes.includes(code))}
-          onRun={(t) => run(code, t)} busy={start.isPending} />)}
+          onRun={(t) => run(code, t)} busy={start.isPending} why={tools.data?.not_installable[code]} />)}
       </ul>
       {error && <p className="m-3 rounded-md border border-bad/20 bg-bad-soft p-2 text-xs text-bad">{error}</p>}
       <div className="mt-auto border-t border-line px-3 py-2 text-[11px] leading-4 text-muted">
@@ -49,7 +50,8 @@ export function RunsPane({ job }: { job: DftJob }) {
   );
 }
 
-function Row({ job, code, targets, onRun, busy }: { job: DftJob; code: string; targets: DftTarget[]; onRun: (t: DftTarget) => void; busy: boolean }) {
+function Row({ job, code, targets, onRun, busy, why }: { job: DftJob; code: string; targets: DftTarget[]; onRun: (t: DftTarget) => void;
+  busy: boolean; why?: string }) {
   const qc = useQueryClient();
   const g = job.provenance.generated[code];
   const r = job.runs?.[code];
@@ -95,6 +97,9 @@ function Row({ job, code, targets, onRun, busy }: { job: DftJob; code: string; t
         </>}
       </div>
       {res?.warnings?.map((w) => <div key={w} className="mt-0.5 text-[10.5px] text-warn">{w}</div>)}
+      {!targets.length && !r && <div className="mt-0.5 text-[10.5px] text-muted">
+        {why ?? "No executable for this code on this machine; install it or add a target in compute.yaml."}
+        {" "}Inputs are in the download and can be run elsewhere, then imported.</div>}
       {imp.isError && <div className="mt-1 text-[10.5px] text-bad">{String(imp.error instanceof Error ? imp.error.message : imp.error)}</div>}
     </li>
   );

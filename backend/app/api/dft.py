@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.agents.llm import LLMError
 from app.config import get_settings
-from app.dft import execute, sources, structure
+from app.dft import execute, sources, structure, tools
 from app.dft.codes import REGISTRY
 from app.dft.codes.exciting import ExcitingSetupError
 from app.dft.codes.questaal import QuestaalSetupError
@@ -183,3 +183,22 @@ async def import_results(job_id: str, code: str, files: list[UploadFile]):
 
     return execute.write_state(d, code, target="imported", kind="import", status="completed",
                                finished=execute.now(), message=f"imported {len(files)} file(s)", results=asdict(res))
+
+
+# --- installing codes ---------------------------------------------------------------
+
+CODE_TOOLS = {"espresso": ["qe", "sssp-pbe"]}  # what one click installs to make a code usable locally
+
+
+@router.get("/tools")
+def list_tools():
+    return {"tools": tools.status(), "not_installable": tools.NOT_INSTALLABLE, "code_tools": CODE_TOOLS,
+            "local": execute.local_executables()}
+
+
+@router.post("/tools/{name}/install")
+def install_tool(name: str):
+    try:
+        return tools.install(name)
+    except tools.ToolError as e:
+        raise HTTPException(400, detail=str(e)) from e

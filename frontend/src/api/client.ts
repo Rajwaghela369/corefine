@@ -123,6 +123,9 @@ export interface DftResults { converged: boolean | null; total_energy_eV: number
 export interface DftRun { code: string; target: string; kind: string; status: string; started?: string; finished?: string | null;
   message: string; attempts?: number; remote_job_id?: string | null; remote_dir?: string; results: DftResults | null; updated: string }
 export interface DftTarget { name: string; kind: "local" | "slurm"; host: string | null; codes: string[]; confirm: boolean }
+export interface DftTool { name: string; label: string; license: string; size: string; source: string; installable: boolean;
+  status: string; message: string; version: string | null }
+export interface DftTools { tools: DftTool[]; not_installable: Record<string, string>; code_tools: Record<string, string[]>; local: Record<string, string> }
 export interface DftJobBody { prompt?: string; structure?: string; codes?: string[]; functional?: string; kmesh?: number[] }
 
 export const dft = {
@@ -135,6 +138,8 @@ export const dft = {
   fileUrl: (id: string, path: string) => `${API}/dft/jobs/${id}/files/${path}`,
   archiveUrl: (id: string) => `${API}/dft/jobs/${id}/archive`,
   targets: () => fetch(`${API}/dft/targets`).then(json<DftTarget[]>),
+  tools: () => fetch(`${API}/dft/tools`).then(json<DftTools>),
+  installTool: (name: string) => fetch(`${API}/dft/tools/${name}/install`, { method: "POST" }).then(json),
   startRun: (id: string, code: string, target: string) => fetch(`${API}/dft/jobs/${id}/runs`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, target }) }).then(json<DftRun>),
   importResults: (id: string, code: string, files: File[]) => {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, dft, type DftJob } from "../api/client";
 import { Quadrants } from "../components/Quadrants";
 import { Button, Empty, Field, PanelHeader, Tag, clock, cn, inputCls, num } from "../components/ui";
@@ -113,6 +113,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
             <span className="text-xs font-medium text-ink-2">Codes</span>
             <span className="text-[11px] text-muted">{registry.filter((c) => c.available).length} of {registry.length} available here</span>
           </div>
+          <CodeInstaller />
           <div className="grid grid-cols-2 gap-2">
             {registry.map((c) => (
               <button key={c.name} onClick={() => toggleCode(c.name)} disabled={!c.available} title={c.reason}
@@ -143,6 +144,52 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
       </div>
       <div className="flex h-9 shrink-0 items-center border-b border-line px-4 text-xs font-medium">Generated sets</div>
       <div className="min-h-0 flex-1 overflow-auto"><JobList selected={selected} onSelect={onSelect} /></div>
+    </div>
+  );
+}
+
+/** Codes that are not usable here: install the open-source ones with one click; explain the others. */
+function CodeInstaller() {
+  const qc = useQueryClient();
+  const cfg = useQuery({ queryKey: ["dft-config"], queryFn: dft.config });
+  const tools = useQuery({ queryKey: ["dft-tools"], queryFn: dft.tools,
+    refetchInterval: (q) => (q.state.data?.tools.some((t) => t.status === "installing") ? 2000 : false) });
+  const install = useMutation({
+    mutationFn: async (names: string[]) => { for (const n of names) await dft.installTool(n); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["dft-tools"] }),
+  });
+  const t = tools.data;
+  const byName = Object.fromEntries((t?.tools ?? []).map((x) => [x.name, x]));
+  const wasInstalling = useRef(false);
+  const installing = (t?.tools ?? []).some((x) => x.status === "installing");
+  useEffect(() => {  // when an install finishes, refresh which codes are usable
+    if (wasInstalling.current && !installing) { qc.invalidateQueries({ queryKey: ["dft-config"] }); qc.invalidateQueries({ queryKey: ["dft-targets"] }); }
+    wasInstalling.current = installing;
+  }, [installing, qc]);
+  const missing = (cfg.data?.codes ?? []).filter((c) => !c.available);
+  if (!t || !missing.length) return null;
+  return (
+    <div className="mb-2 space-y-1.5 rounded-md border border-line bg-subtle/60 p-2">
+      {missing.map((c) => {
+        const names = t.code_tools[c.name];
+        const parts = (names ?? []).map((n) => byName[n]).filter(Boolean);
+        const busy = parts.some((x) => x.status === "installing");
+        const failed = parts.find((x) => x.status === "failed");
+        return (
+          <div key={c.name} className="text-[11px] leading-4">
+            <div className="flex items-center justify-between gap-2">
+              <span><span className="font-medium text-ink-2">{c.label}</span> <span className="text-muted">not available here</span></span>
+              {names && <Button size="sm" variant="secondary" disabled={busy || install.isPending}
+                onClick={() => install.mutate(names.filter((n) => byName[n]?.status !== "installed"))}>
+                {busy ? "Installing…" : "Install"}</Button>}
+            </div>
+            {names ? <div className="text-muted">{parts.map((x) => `${x.label} (${x.license}, ${x.size})`).join(" + ")}</div>
+              : <div className="text-muted">{t.not_installable[c.name] ?? c.reason}</div>}
+            {busy && <div className="text-accent">{parts.find((x) => x.status === "installing")?.message}</div>}
+            {failed && <div className="text-bad">Install failed: {failed.message}</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }

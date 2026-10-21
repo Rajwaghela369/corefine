@@ -1,8 +1,9 @@
 """Quantum ESPRESSO (plane waves + pseudopotentials, pw.x): pw.in written with ASE, pseudopotentials copied alongside.
 
-Pseudopotentials come from the user's QE_PSEUDO_DIR (any library: SSSP, pslibrary, ...); nothing is
-downloaded or guessed. For each element exactly one candidate file must match; with several, the one
-whose header functional matches the request is used, otherwise the request is refused with the list.
+Pseudopotentials come from the user's QE_PSEUDO_DIR (any library: SSSP, pslibrary, ...) or, if unset,
+from the SSSP library CoRefine installs (app/dft/tools.py); nothing is guessed. For each element exactly
+one candidate file must match; with several, the one whose header functional matches the request is
+used, otherwise the request is refused with the list.
 pw.x has no default plane-wave cutoff, so it is taken from (in order) an SSSP-style JSON in the pseudo
 folder, or the cutoffs the pseudopotential file itself suggests; if neither exists the request is refused.
 The functional is not forced in pw.in: QE takes it from the pseudopotentials, and the check verifies that
@@ -72,15 +73,33 @@ class EspressoAdapter(CodeAdapter):
     name, label, method, main_file = "espresso", "Quantum ESPRESSO", "plane waves + pseudopotentials (pw.x)", "pw.in"
     program = "pw.x"
 
+    def pseudo_dir(self, s: Settings, functional: str) -> Path | None:
+        """Your own QE_PSEUDO_DIR if set, else the SSSP library CoRefine installed for that functional."""
+        if s.QE_PSEUDO_DIR:
+            return s.QE_PSEUDO_DIR
+        from app.dft import tools
+
+        return tools.managed_pseudo_dir(functional)
+
     def availability(self, s: Settings) -> tuple[bool, str]:
-        if not s.QE_PSEUDO_DIR:
-            return False, "QE_PSEUDO_DIR not set (folder of .UPF pseudopotentials, e.g. an SSSP library)"
-        if not s.QE_PSEUDO_DIR.is_dir() or not any(s.QE_PSEUDO_DIR.glob("*.[uU][pP][fF]")):
-            return False, f"no .UPF files in {s.QE_PSEUDO_DIR}"
-        return True, f"pseudopotentials from {s.QE_PSEUDO_DIR}"
+        if s.QE_PSEUDO_DIR:
+            if not s.QE_PSEUDO_DIR.is_dir() or not any(s.QE_PSEUDO_DIR.glob("*.[uU][pP][fF]")):
+                return False, f"no .UPF files in {s.QE_PSEUDO_DIR}"
+            return True, f"pseudopotentials from {s.QE_PSEUDO_DIR}"
+        installed = [f for f in ("PBE", "PBEsol") if self.pseudo_dir(s, f)]
+        if installed:
+            return True, f"SSSP pseudopotentials installed by CoRefine ({', '.join(installed)})"
+        return False, "no pseudopotentials: install SSSP from the Codes panel, or set QE_PSEUDO_DIR"
 
     def functionals(self) -> dict[str, str]:
         return {"PBE": "from pseudopotentials", "PBEsol": "from pseudopotentials", "LDA": "from pseudopotentials"}
+
+    def problems(self, req: CalcRequest) -> list[str]:
+        from app.config import get_settings
+
+        if self.pseudo_dir(get_settings(), req.functional) is None:
+            return [f"Quantum ESPRESSO: no {req.functional} pseudopotentials (install SSSP {req.functional} or set QE_PSEUDO_DIR)"]
+        return []
 
     def choose_pseudos(self, elements: list[str], functional: str, pseudo_dir: Path) -> dict[str, Path]:
         sssp = sssp_cutoffs(pseudo_dir).get("table", {})
@@ -107,8 +126,11 @@ class EspressoAdapter(CodeAdapter):
     def write(self, cell: Cell, req: CalcRequest, outdir: Path, s: Settings, title: str) -> dict:
         outdir.mkdir(parents=True, exist_ok=True)
         elements = list(dict.fromkeys(cell.symbols))
-        pseudos = self.choose_pseudos(elements, req.functional, s.QE_PSEUDO_DIR)
-        sssp = sssp_cutoffs(s.QE_PSEUDO_DIR)
+        pdir = self.pseudo_dir(s, req.functional)
+        if pdir is None:
+            raise EspressoSetupError(f"no {req.functional} pseudopotentials available")
+        pseudos = self.choose_pseudos(elements, req.functional, pdir)
+        sssp = sssp_cutoffs(pdir)
         wfc, rho, source = [], [], None
         for el, p in pseudos.items():
             h = upf_header(p)
@@ -142,7 +164,8 @@ class EspressoAdapter(CodeAdapter):
                 "defaults": {"source": f"pw.x defaults; cutoffs from {source}",
                              "values": {"ecutwfc_Ry": ecutwfc, "ecutrho_Ry": ecutrho, "occupations": "fixed (pw.x default)",
                                         "conv_thr": "1e-6 (pw.x default)"}},
-                "pseudopotentials": {el: p.name for el, p in pseudos.items()}}
+                "pseudopotentials": {el: p.name for el, p in pseudos.items()}, "pseudo_dir": str(pdir),
+                "pseudo_md5": {p.name: (sssp.get("table", {}).get(el) or {}).get("md5") for el, p in pseudos.items()}}
 
     def read_back(self, outdir: Path, req: CalcRequest) -> ReadBack:
         atoms = ase_read(outdir / "pw.in", format="espresso-in")
@@ -154,6 +177,18 @@ class EspressoAdapter(CodeAdapter):
                   "detail": " ".join(k.groups()) if k else "no automatic K_POINTS"},
                  {"check": "pseudopotential files present next to pw.in", "ok": all((outdir / f).is_file() for _, f in species),
                   "detail": ", ".join(f for _, f in species)}]
+        prov = outdir.parent / "provenance.json"
+        expected = {}
+        if prov.is_file():
+            import json as _json
+
+            expected = (_json.loads(prov.read_text()).get("generated", {}).get(self.name, {}) or {}).get("pseudo_md5", {})
+        for _, f in species:
+            if expected.get(f):
+                import hashlib
+
+                got = hashlib.md5((outdir / f).read_bytes()).hexdigest()
+                extra.append({"check": f"{f} matches the library's published MD5", "ok": got == expected[f], "detail": got})
         return ReadBack(atoms=atoms, kmesh=[int(x) for x in k.group(1, 2, 3)] if k else None,
                         functional_ok=bool(fams) and all(f == req.functional for f in fams.values()),
                         functional_detail=f"pseudopotential functionals {fams}", extra_checks=extra)

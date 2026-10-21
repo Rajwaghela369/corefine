@@ -133,6 +133,22 @@ codes: formula, space group, volume per atom, nearest-neighbour distance, k-mesh
 each code's own checks (exciting: schema validation; Questaal: `lmchk` symmetry and sphere overlap).
 Output: one folder per code, plus `checks.json`, `provenance.json` and `SUMMARY.md`, downloadable as a zip.
 
+### Codes for people who have nothing installed
+
+The DFT panel offers one-click installs of open-source codes and their data, into
+`backend/.local/tools/` (no root, no system changes), each verified before use:
+
+| Tool | What | Source | Licence | Check |
+|---|---|---|---|---|
+| micromamba | package installer (single binary) | official mamba-org GitHub release | BSD-3 / MIT | SHA-256 from the release |
+| Quantum ESPRESSO 7.6 | `pw.x` and friends | conda-forge `qe` (OpenMPI build) | GPL-2.0 | binary present, `ldd` finds every library |
+| SSSP 1.3 PBE / PBEsol efficiency | pseudopotentials + recommended cutoffs | Materials Cloud Archive | CC-BY 4.0 | MD5 from the archive's file listing; per-file MD5 rechecked in every input set |
+
+Installed codes become runnable locally with no configuration (an implicit `local` target). exciting and
+Questaal are open source but not packaged on conda-forge (build from source and set `EXCITING_BIN` /
+`QUESTAAL_BIN`); VASP is commercial and cannot be installed, so only its inputs are generated.
+Note: the conda-forge `qe` 7.6 build links ELPA without declaring it, so the recipe requests ELPA explicitly.
+
 ### Running the calculations
 
 Where things run is per-user configuration: copy `backend/compute.example.yaml` to `compute.yaml`
