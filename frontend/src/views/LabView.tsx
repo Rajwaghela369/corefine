@@ -1,39 +1,42 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileClock } from "lucide-react";
+import { FileClock, FileText, LayoutDashboard, LineChart, Table2, Workflow } from "lucide-react";
 import { useState } from "react";
 import { api, type RunDetail } from "../api/client";
-import { Quadrants } from "../components/Quadrants";
+import { Dot, Sections } from "../components/Sections";
 import { Button, Empty, Status, Tag, type Tone, clock, cn, duration, fixed, num } from "../components/ui";
 import { ChatPanel, ClaimBadge } from "../panels/ChatPanel";
 import { RunsList } from "../panels/RunsList";
 import { useRunEvents } from "../useRunEvents";
+import { BridgeView } from "./BridgeView";
 import { DftView } from "./DftView";
-import { DataPane, PlanPane, PlotsPane, ReportPane } from "./Panes";
+import { DataPane, InteractiveRunPlot, PlanPane, PlotsPane, ReportPane } from "./Panes";
 
 export function LabView({ session, runId, setRunId, selected, toggle }: {
   session: string; runId: string | null; setRunId: (id: string | null) => void;
   selected: Set<string>; toggle: (id: string) => void;
 }) {
   const params = new URLSearchParams(window.location.search);
-  const [mode, setMode] = useState<"xrd" | "dft">(params.get("mode") === "dft" ? "dft" : "xrd");
+  const m0 = params.get("mode");
+  const [mode, setMode] = useState<"xrd" | "dft" | "bridge">(m0 === "dft" || m0 === "bridge" ? m0 : "xrd");
   const [jobId, setJobId] = useState<string | null>(params.get("job"));
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
         <span className="text-[11px] font-medium uppercase tracking-wider text-faint">Workflow</span>
         <div className="flex rounded-md border border-line-strong p-0.5">
-          {([["xrd", "XRD refinement"], ["dft", "DFT inputs"]] as const).map(([m, label]) => (
+          {([["xrd", "Experiment · XRD"], ["dft", "Theory · DFT"], ["bridge", "Theory ↔ Experiment"]] as const).map(([m, label]) => (
             <button key={m} onClick={() => setMode(m)} className={cn("rounded px-3 py-1 text-xs",
               mode === m ? "bg-ink font-medium text-white" : "text-muted hover:text-ink")}>{label}</button>
           ))}
         </div>
         <span className="text-[11px] text-muted">{mode === "xrd"
           ? "Measured pattern → agents write and run the analysis → traced report"
-          : "Structure → inputs for every configured DFT code (all-electron and pseudopotential) → checks, runs, studies"}</span>
+          : mode === "dft" ? "Material → plan → inputs for every code → checks, runs, convergence, EOS, Raman"
+          : "What the measurement says next to what every code predicts"}</span>
       </div>
       <div className="min-h-0 flex-1">
         {mode === "xrd" ? <XrdLab session={session} runId={runId} setRunId={setRunId} selected={selected} toggle={toggle} />
-          : <DftView jobId={jobId} setJobId={setJobId} />}
+          : mode === "dft" ? <DftView jobId={jobId} setJobId={setJobId} /> : <BridgeView />}
       </div>
     </div>
   );
@@ -120,16 +123,58 @@ function Stat({ label, value, unit, sub }: { label: string; value: string; unit:
 
 function Workspace({ run }: { run: RunDetail }) {
   const [log, setLog] = useState(false);
+  const all = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
+  const measuredId = run.dataset_ids.find((id) => all.data?.find((d) => d.id === id)?.role === "measured_pattern");
+  const peaksPath = run.artifacts.map((a) => a.path).filter((p) => p.startsWith("outputs/") && p.endsWith("peaks.csv")).at(-1);
+  const failed = run.steps.filter((s) => s.status === "failed").length;
+  const live = ["queued", "planning", "running", "analysing"].includes(run.status);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Summary run={run} />
-      <Quadrants panes={[
-        { key: "plan", title: "Plan", body: <PlanPane run={run} logOpen={log} onLogClose={() => setLog(false)} />,
-          extra: <Button size="sm" variant="ghost" onClick={() => setLog(true)} title="Experiment log"><FileClock size={13} /> Log</Button> },
-        { key: "plots", title: "Plots", body: <PlotsPane run={run} /> },
-        { key: "data", title: "Data", body: <DataPane run={run} /> },
-        { key: "report", title: "Report", body: <ReportPane run={run} /> },
+      <Sections key={run.id} sections={[
+        { key: "overview", label: "Overview", icon: LayoutDashboard, badge: live ? <Dot tone="run" /> : undefined,
+          body: <XrdOverview run={run} measuredId={measuredId} peaksPath={peaksPath} /> },
+        { key: "plan", label: "Plan", icon: Workflow, badge: failed ? <Dot tone="bad" /> : undefined,
+          body: <PlanPane run={run} logOpen={log} onLogClose={() => setLog(false)} />,
+          extra: <Button size="sm" variant="ghost" onClick={() => setLog(true)}><FileClock size={13} /> Experiment log</Button> },
+        { key: "plots", label: "Plots", icon: LineChart, body: <PlotsPane run={run} /> },
+        { key: "data", label: "Data", icon: Table2, body: <DataPane run={run} /> },
+        { key: "report", label: "Report", icon: FileText, body: <ReportPane run={run} />,
+          badge: run.claim_check ? <Dot tone={run.claim_check.passed ? "ok" : "bad"} /> : undefined },
       ]} />
+    </div>
+  );
+}
+
+function XrdOverview({ run, measuredId, peaksPath }: { run: RunDetail; measuredId?: string; peaksPath?: string }) {
+  const cls = run.classification ? CLASS[run.classification] : null;
+  return (
+    <div className="flex h-full flex-col overflow-auto">
+      {measuredId ? <InteractiveRunPlot runId={run.id} datasetId={measuredId} peaksPath={peaksPath} />
+        : <p className="p-4 text-xs text-muted">No measured pattern in this run's inputs.</p>}
+      <div className="grid gap-4 p-4 md:grid-cols-2">
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-faint">What ran</h3>
+          <ol className="space-y-1.5">
+            {(run.plan?.steps ?? []).map((s) => {
+              const st = run.steps.find((x) => x.idx === s.idx);
+              return <li key={s.idx} className="flex items-center gap-2 text-[13px]">
+                <span className="w-5 font-mono text-[11px] text-faint">{String(s.idx).padStart(2, "0")}</span>
+                <span className="font-mono text-[12px]">{s.name}</span>
+                <Status status={st?.status ?? "pending"} />
+                {st && st.attempts > 1 && <span className="text-[11px] text-warn">recovered on attempt {st.attempts}</span>}
+              </li>;
+            })}
+          </ol>
+        </div>
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-faint">Verdict</h3>
+          {cls ? <Tag tone={cls.tone}>{cls.label}</Tag> : <span className="text-[13px] text-muted">pending</span>}
+          <p className="mt-2 text-[13px] leading-6 text-ink-2">
+            The agents planned the analysis, wrote and ran the code in a sandbox, and the analyst's report passed the number
+            check: every value in it traces to a file this run produced.</p>
+        </div>
+      </div>
     </div>
   );
 }

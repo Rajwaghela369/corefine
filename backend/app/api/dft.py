@@ -241,12 +241,18 @@ def start_workflow(body: WorkflowBody):
 
 # --- convergence and equation-of-state studies ------------------------------------------
 
+class StudyBody(BaseModel):
+    kmesh: tuple[int, int, int] | None = None   # EOS only: your k-mesh for every code (default: converged, else plan)
+
+
 @router.post("/jobs/{job_id}/studies/{kind}")
-def start_study(job_id: str, kind: str):
+def start_study(job_id: str, kind: str, body: StudyBody | None = None):
     if kind not in ("convergence", "eos"):
         raise HTTPException(404, detail="studies: convergence or eos")
+    if body and body.kmesh and not all(1 <= k <= 24 for k in body.kmesh):
+        raise HTTPException(400, detail="k-mesh entries must be 1..24")
     try:
-        return studies.start(job_dir(job_id), kind)
+        return studies.start(job_dir(job_id), kind, kmesh=body.kmesh if body else None)
     except execute.ComputeConfigError as e:
         raise HTTPException(400, detail=str(e)) from e
 
@@ -277,3 +283,13 @@ def start_raman(job_id: str, body: RamanBody):
         return raman.start(job_dir(job_id), body.code, body.kmesh)
     except execute.ComputeConfigError as e:
         raise HTTPException(400, detail=str(e)) from e
+
+
+@router.get("/plan-preview")
+def plan_preview(material: str, functional: str = "PBE"):
+    """The plan the workflow would use for this material, before anything is written (shows the planned k-mesh)."""
+    try:
+        plan, entry = workflow.plan_for(material.removeprefix("mp:"), None, functional)
+    except (materials.SearchError, sources.SourceError) as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return {"plan": plan.model_dump(), "material": entry}

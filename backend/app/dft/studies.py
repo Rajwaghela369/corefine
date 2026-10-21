@@ -180,7 +180,7 @@ def cubic_a0(cell, v0_per_atom: float) -> float | None:
     return float((v0_per_atom * len(conv[2])) ** (1 / 3))
 
 
-def eos(set_dir: Path, codes: list[str] | None = None, use_converged: bool = True) -> dict:
+def eos(set_dir: Path, codes: list[str] | None = None, use_converged: bool = True, kmesh: tuple | None = None) -> dict:
     base = _base_request(set_dir)
     codes = codes or _runnable(base)
     conv = read(set_dir).get("convergence", {}).get("codes", {}) if use_converged else {}
@@ -189,8 +189,9 @@ def eos(set_dir: Path, codes: list[str] | None = None, use_converged: bool = Tru
           codes={}, delta_meV_per_atom={})
     for code in codes:
         c = conv.get(code) or {}
+        k = tuple(kmesh) if kmesh else (tuple(c["converged_kmesh"]) if c.get("converged_kmesh") else None)
         req = base.model_copy(update={"sphere_ref_scale": min(EOS_SCALES),
-                                      **({"kmesh": tuple(c["converged_kmesh"])} if c.get("converged_kmesh") else {}),
+                                      **({"kmesh": k} if k else {}),
                                       **({"basis_scale": c["converged_basis_scale"]} if c.get("converged_basis_scale") else {})})
         pts = []
         for sc in EOS_SCALES:
@@ -198,7 +199,8 @@ def eos(set_dir: Path, codes: list[str] | None = None, use_converged: bool = Tru
             pts.append({"scale": sc, **_point(d / code / f"v_{sc:.2f}", req.model_copy(update={"volume_scale": sc}), code)})
         good = [p for p in pts if p["ok"]]
         entry = {"points": pts, "settings": {"kmesh": list(req.kmesh), "basis_scale": req.basis_scale,
-                                             "from_convergence": bool(c)}}
+                                             "from_convergence": bool(c), "kmesh_source": "yours" if kmesh else
+                                             ("converged" if c.get("converged_kmesh") else "plan")}}
         if len(good) >= 5:
             fit = fit_bm([p["volume_per_atom_A3"] for p in good], [p["e_per_atom_eV"] for p in good])
             ref_v = json.loads((set_dir / "provenance.json").read_text())["cell"]["volume_per_atom_A3"]
@@ -226,8 +228,8 @@ def eos(set_dir: Path, codes: list[str] | None = None, use_converged: bool = Tru
     return _save(d, status="done", message="", codes=st["codes"], delta_meV_per_atom=delta, reference=ref)
 
 
-def start(set_dir: Path, kind: str, wait: bool = False) -> dict:
-    fn = {"convergence": convergence, "eos": eos}[kind]
+def start(set_dir: Path, kind: str, wait: bool = False, kmesh: tuple | None = None) -> dict:
+    fn = {"convergence": convergence, "eos": lambda d: eos(d, kmesh=kmesh)}[kind]
     d = study_dir(set_dir, kind)
     if _state(d).get("status") == "running":
         raise execute.ComputeConfigError(f"a {kind} study is already running for this set")

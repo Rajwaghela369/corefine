@@ -142,7 +142,7 @@ export function PlotsPane({ run }: { run: RunDetail }) {
 }
 
 /** The measured scan with the run's fitted peak centres (from its peaks.csv) as labelled sticks; zoomable. */
-function InteractiveRunPlot({ runId, datasetId, peaksPath }: { runId: string; datasetId: string; peaksPath?: string }) {
+export function InteractiveRunPlot({ runId, datasetId, peaksPath }: { runId: string; datasetId: string; peaksPath?: string }) {
   const m = useQuery({ queryKey: ["xrd-measured", datasetId, undefined], queryFn: () => xrd.measured(datasetId) });
   const csv = useQuery({ queryKey: ["file", runId, peaksPath], queryFn: () => api.artifactText(runId, peaksPath!), enabled: !!peaksPath });
   const overlays: Overlay[] = useMemo(() => {

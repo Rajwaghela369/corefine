@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, dft, type DftJob, type MpMaterial } from "../api/client";
-import { Quadrants } from "../components/Quadrants";
-import { Button, Empty, Field, PanelHeader, Tag, clock, cn, inputCls, num } from "../components/ui";
-import { RunsPane, livePollInterval } from "./DftRuns";
-import { ConvergencePane, EosPane } from "./DftStudies";
+import { Button, Empty, Field, PanelHeader, Status, Tag, clock, cn, inputCls, num } from "../components/ui";
+import { RunsPane, livePollInterval, runIsLive } from "./DftRuns";
+import { ConvergencePane, EosPane, RamanPane } from "./DftStudies";
+import { Dot, Sections } from "../components/Sections";
+import { Atom, FileCode, LayoutDashboard, Play, ShieldCheck, Sigma, TrendingDown, Waves } from "lucide-react";
 
 type SourceKind = "find" | "storage" | "mp" | "cod" | "upload";
 const SOURCE_TABS: { id: SourceKind; label: string }[] = [
@@ -37,7 +38,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
   const structures = (datasets.data ?? []).filter((d) => d.valid && d.role === "reference_structure");
   const [kind, setKind] = useState<SourceKind>("find");
   const [picked, setPicked] = useState<MpMaterial | null>(null);
-  const [autoK, setAutoK] = useState(true);
+  const [kTouched, setKTouched] = useState(false);
   const [goal, setGoal] = useState("");
   const [ds, setDs] = useState("");
   const [mp, setMp] = useState("mp-149");
@@ -45,6 +46,11 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
   const [uploaded, setUploaded] = useState<{ structure: string; name: string; summary: string } | null>(null);
   const [xc, setXc] = useState("PBE");
   const [k, setK] = useState([2, 2, 2]);
+  const preview = useQuery({ queryKey: ["plan-preview", picked?.id, xc], enabled: kind === "find" && !!picked,
+    queryFn: () => dft.planPreview(picked!.id, xc) });
+  const plannedK = (preview.data?.plan.request.kmesh as number[] | undefined) ?? null;
+  // show the mesh the planner will use; keep the person's own mesh once they type one
+  useEffect(() => { if (plannedK && !kTouched) setK(plannedK); }, [plannedK?.join(","), kTouched]);  // eslint-disable-line react-hooks/exhaustive-deps
   const [codes, setCodes] = useState<string[]>([]);
   const registry = cfg.data?.codes ?? [];
   // default: every code that is usable on this server
@@ -58,7 +64,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
     : uploaded?.structure ?? "";
 
   const wf = useMutation({
-    mutationFn: () => dft.workflow({ material: picked!.id, functional: xc, kmesh: autoK ? null : k, codes,
+    mutationFn: () => dft.workflow({ material: picked!.id, functional: xc, kmesh: kTouched ? k : null, codes,
       goal: goal.trim() || undefined }),
     onSuccess: (r) => { setError(null); qc.invalidateQueries({ queryKey: ["dft-jobs"] }); onCreated(r.id); },
     onError: (e) => setError(e instanceof Error ? e.message : String(e)),
@@ -89,7 +95,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
                 kind === t.id ? "bg-ink text-white" : "text-muted hover:text-ink")}>{t.label}</button>
             ))}
           </div>
-          {kind === "find" && <MaterialSearch picked={picked} onPick={setPicked} />}
+          {kind === "find" && <MaterialSearch picked={picked} onPick={(m) => { setPicked(m); setKTouched(false); }} />}
           {kind === "storage" && (structures.length
             ? <select className={inputCls} value={ds || structures[0].id} onChange={(e) => setDs(e.target.value)}>
                 {structures.map((d) => <option key={d.id} value={d.id}>{d.id}</option>)}</select>
@@ -114,13 +120,16 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
               <option>PBE</option><option>PBEsol</option><option>LDA</option>
             </select>
           </Field>
-          <Field label={kind === "find" ? "k-mesh" : "k-mesh"}>
-            {kind === "find" && <label className="mb-1 flex items-center gap-1.5 text-[11px] text-muted">
-              <input type="checkbox" checked={autoK} onChange={(e) => setAutoK(e.target.checked)} /> from k-point spacing (planner)</label>}
-            <div className={cn("grid grid-cols-3 gap-1", kind === "find" && autoK && "pointer-events-none opacity-40")}>
-              {k.map((v, i) => <input key={i} type="number" min={1} max={24} className={cn(inputCls, "px-1.5 text-center font-mono")} value={v}
-                onChange={(e) => setK(k.map((x, j) => (j === i ? Math.max(1, Number(e.target.value) || 1) : x)))} />)}
+          <Field label="k-mesh (Γ-centred)">
+            <div className="grid grid-cols-3 gap-1">
+              {k.map((v, i) => <input key={i} type="number" min={1} max={24} className={cn(inputCls, "px-1.5 text-center font-mono",
+                kind === "find" && !kTouched && "text-muted")} value={v}
+                onChange={(e) => { setKTouched(true); setK(k.map((x, j) => (j === i ? Math.max(1, Number(e.target.value) || 1) : x))); }} />)}
             </div>
+            {kind === "find" && <div className="mt-1 text-[10.5px] leading-4 text-muted">
+              {!picked ? "pick a material to see the planned mesh" : preview.isFetching ? "planning…"
+                : kTouched ? <>your mesh is used · <button className="text-accent hover:underline" onClick={() => { setKTouched(false); if (plannedK) setK(plannedK); }}>use planned</button></>
+                : "planned from a 0.3 Å⁻¹ k-point spacing; type to override"}</div>}
           </Field>
         </div>
         <div>
@@ -274,7 +283,7 @@ function JobList({ selected, onSelect }: { selected: string | null; onSelect: (i
 function JobWorkspace({ id }: { id: string }) {
   const q = useQuery({ queryKey: ["dft-job", id], queryFn: () => dft.job(id),
     refetchInterval: (query) => livePollInterval(query.state.data) ||
-      (Object.values(query.state.data?.studies ?? {}).some((x) => x?.status === "running" || x?.status === "queued") ? 3000 : false) });
+      (studiesLive(query.state.data) ? 3000 : false) });
   if (q.isError) return <Empty title="Could not load this input set">{String(q.error)}</Empty>;
   if (!q.data) return <Empty title="Loading…" />;
   const job = q.data;
@@ -297,11 +306,20 @@ function JobWorkspace({ id }: { id: string }) {
           <Cellv label="Nearest neighbour" value={`${num(p.cell.nearest_neighbour_A)} Å`} mono />
         </div>
       </div>
-      <Quadrants panes={[
-        { key: "structure", title: "Structure", body: <StructurePane job={job} /> },
-        { key: "checks", title: "Sanity checks", body: <ChecksPane job={job} /> },
-        { key: "inputs", title: "Inputs", body: <InputsPane job={job} /> },
-        { key: "runs", title: "Runs & studies", body: <RunsAndStudies job={job} /> },
+      <Sections key={id} initial={new URLSearchParams(window.location.search).get("study") ?? undefined} sections={[
+        { key: "overview", label: "Overview", icon: LayoutDashboard, body: <DftOverview job={job} /> },
+        { key: "structure", label: "Structure & plan", icon: Atom, body: <StructurePane job={job} /> },
+        { key: "checks", label: "Checks", icon: ShieldCheck, body: <ChecksPane job={job} />,
+          badge: <Dot tone={job.checks.passed ? "ok" : "bad"} /> },
+        { key: "inputs", label: "Inputs", icon: FileCode, body: <InputsPane job={job} /> },
+        { key: "runs", label: "Runs", icon: Play, body: <RunsPane job={job} />,
+          badge: Object.values(job.runs ?? {}).some(runIsLive) ? <Dot tone="run" /> : undefined },
+        { key: "convergence", label: "Convergence", icon: TrendingDown, body: <ConvergencePane job={job} />,
+          badge: studyDot(job.studies?.convergence?.status) },
+        { key: "eos", label: "Equation of state", icon: Sigma, body: <EosPane job={job} />, badge: studyDot(job.studies?.eos?.status) },
+        { key: "raman", label: "Raman", icon: Waves, body: <RamanPane job={job} />,
+          badge: studyDot(Object.values(job.studies?.raman ?? {}).map((x) => x.status).find((x) => x === "running") ??
+            Object.values(job.studies?.raman ?? {})[0]?.status) },
       ]} />
     </div>
   );
@@ -393,18 +411,52 @@ function ChecksPane({ job }: { job: DftJob }) {
   );
 }
 
-function RunsAndStudies({ job }: { job: DftJob }) {
-  const initial = new URLSearchParams(window.location.search).get("study");  // ?study=eos opens that tab (shareable link)
-  const [tab, setTab] = useState<"runs" | "convergence" | "eos">(initial === "eos" || initial === "convergence" ? initial : "runs");
+function studiesLive(job?: DftJob) {
+  const st = job?.studies;
+  const all = [st?.convergence?.status, st?.eos?.status, ...Object.values(st?.raman ?? {}).map((r) => r.status)];
+  return all.some((x) => x === "running" || x === "queued");
+}
+
+function studyDot(status?: string) {
+  if (!status) return undefined;
+  return <Dot tone={status === "done" ? "ok" : status === "failed" ? "bad" : "run"} />;
+}
+
+function DftOverview({ job }: { job: DftJob }) {
+  const p = job.provenance;
+  const failed = job.checks.results.filter((r) => r.ok === false).length;
+  const eos = job.studies?.eos;
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex gap-1 border-b border-line bg-subtle/60 px-2 py-1">
-        {([["runs", "Runs"], ["convergence", "Convergence"], ["eos", "Equation of state"]] as const).map(([k, l]) =>
-          <button key={k} onClick={() => setTab(k)} className={cn("rounded px-2 py-0.5 text-[11.5px]",
-            tab === k ? "bg-surface font-medium text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink")}>{l}
-            {k !== "runs" && job.studies?.[k]?.status === "running" && <span className="ml-1 text-accent">•</span>}</button>)}
+    <div className="grid h-full gap-4 overflow-auto p-4 text-[13px] md:grid-cols-2">
+      <div className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Plan</h3>
+        <ul className="space-y-1.5">{(job.plan?.decisions ?? []).map((d, i) => (
+          <li key={i}><span className="text-muted">{d.field}</span> <span className="font-mono">{d.value}</span>
+            <div className="text-[11.5px] text-faint">{d.reason}</div></li>))}
+          {!job.plan && <li className="text-muted">Set made from explicit settings: {p.request.functional}, k {p.request.kmesh.join("×")}.</li>}
+        </ul>
+        {job.plan?.warnings.map((w) => <p key={w} className="rounded bg-warn-soft px-2 py-1 text-[12px] text-warn">{w}</p>)}
       </div>
-      <div className="min-h-0 flex-1">{tab === "runs" ? <RunsPane job={job} /> : tab === "convergence" ? <ConvergencePane job={job} /> : <EosPane job={job} />}</div>
+      <div className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Checks</h3>
+        <p>{failed ? <Tag tone="bad">{failed} failed</Tag> : <Tag tone="ok">all passed</Tag>} <span className="text-muted">
+          {job.checks.results.length} checks across {Object.keys(p.generated).length} codes: each input read back as its code reads it.</span></p>
+        <h3 className="pt-2 text-xs font-semibold uppercase tracking-wider text-faint">Runs</h3>
+        <table className="tabular w-full text-[12.5px]"><tbody className="divide-y divide-line">
+          {Object.entries(p.generated).map(([code, g]) => {
+            const r = job.runs?.[code]; const res = r?.results;
+            return <tr key={code}><td className="py-1 font-medium">{g.label}</td>
+              <td>{r ? <Status status={r.status === "completed" ? "done" : r.status === "waiting" ? "queued" : r.status} /> : <span className="text-faint">not run</span>}</td>
+              <td className="font-mono">{res?.gap_eV != null ? `${res.gap_eV.toFixed(3)} eV` : ""}</td>
+              <td className="text-muted">{res ? (res.converged ? "converged" : "not converged") : ""}</td></tr>;
+          })}
+        </tbody></table>
+        <h3 className="pt-2 text-xs font-semibold uppercase tracking-wider text-faint">Studies</h3>
+        <p className="text-muted">Convergence: {job.studies?.convergence?.status ?? "not run"} · Equation of state: {eos?.status ?? "not run"}
+          {eos?.delta_meV_per_atom && Object.keys(eos.delta_meV_per_atom).length > 0 &&
+            ` · largest Δ ${Math.max(...Object.values(eos.delta_meV_per_atom)).toFixed(2)} meV/atom`}
+          {" · "}Raman: {Object.keys(job.studies?.raman ?? {}).join(", ") || "not run"}</p>
+      </div>
     </div>
   );
 }

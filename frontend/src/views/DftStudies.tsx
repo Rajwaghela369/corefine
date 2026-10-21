@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, Play } from "lucide-react";
+import { useState } from "react";
 import { api, dft, type DftJob, type EosFit, type StudyPoint } from "../api/client";
 import { Button, Empty, Tag, num } from "../components/ui";
 
@@ -25,7 +26,7 @@ function StudyHeader({ job, kind, label, note }: { job: DftJob; kind: "convergen
 }
 
 /** Small SVG line chart; series share axes. */
-function Chart({ series, xLabel, yLabel, logY, height = 170 }: { series: { name: string; pts: [number, number][]; dashed?: boolean; dots?: boolean }[];
+export function Chart({ series, xLabel, yLabel, logY, height = 170 }: { series: { name: string; pts: [number, number][]; dashed?: boolean; dots?: boolean }[];
   xLabel: string; yLabel: string; logY?: boolean; height?: number }) {
   const all = series.flatMap((s) => s.pts).filter(([, y]) => !logY || y > 0);
   if (!all.length) return null;
@@ -35,7 +36,7 @@ function Chart({ series, xLabel, yLabel, logY, height = 170 }: { series: { name:
   const sx = (x: number) => L + ((x - x0) / (x1 - x0 || 1)) * (W - L - R);
   const sy = (y: number) => H - B - (((logY ? Math.log10(y) : y) - y0) / (y1 - y0 || 1)) * (H - T - B);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+    <svg viewBox={`0 0 ${W} ${H}`} className="mx-auto block w-full max-w-[620px]">
       <line x1={L} y1={H - B} x2={W - R} y2={H - B} stroke="#cfd4dc" /><line x1={L} y1={T} x2={L} y2={H - B} stroke="#cfd4dc" />
       <text x={W / 2} y={H - 6} fontSize="10" textAnchor="middle" fill="#6b7484">{xLabel}</text>
       <text x={10} y={H / 2} fontSize="10" textAnchor="middle" fill="#6b7484" transform={`rotate(-90 10 ${H / 2})`}>{yLabel}</text>
@@ -90,6 +91,28 @@ export function ConvergencePane({ job }: { job: DftJob }) {
   );
 }
 
+function EosHeader({ job }: { job: DftJob }) {
+  const qc = useQueryClient();
+  const st = job.studies?.eos;
+  const [k, setK] = useState(["", "", ""]);
+  const custom = k.every((v) => Number(v) >= 1) ? k.map(Number) : null;
+  const go = useMutation({ mutationFn: () => dft.startStudy(job.id, "eos", custom), onSettled: () => qc.invalidateQueries({ queryKey: ["dft-job", job.id] }) });
+  const running = st?.status === "running" || st?.status === "queued";
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-xs">
+      <span className="text-muted">7 volumes 94–106 %, Birch–Murnaghan.</span>
+      <span className="text-muted">k-mesh:</span>
+      {k.map((v, i) => <input key={i} value={v} placeholder="–" onChange={(e) => setK(k.map((x, j) => (j === i ? e.target.value.replace(/\D/g, "") : x)))}
+        className="h-7 w-10 rounded border border-line-strong px-1 text-center font-mono" />)}
+      <span className="text-[11px] text-faint">{custom ? "yours, for every code" : "blank = converged per code (else the plan's)"}</span>
+      {running && <span className="text-accent">{st?.message || "running…"}</span>}
+      {st?.status === "failed" && <span className="text-bad">{st.message}</span>}
+      <Button size="sm" variant="secondary" className="ml-auto" disabled={running || go.isPending} onClick={() => go.mutate()}>
+        <Play size={11} /> {st ? "Rerun" : "Run"} equation of state</Button>
+    </div>
+  );
+}
+
 function bm(v: number, f: { V0_A3_per_atom: number; B0_GPa: number; B0_prime: number }) {
   const eta = (f.V0_A3_per_atom / v) ** (2 / 3), b = f.B0_GPa * GPA;
   return (9 * f.V0_A3_per_atom * b / 16) * ((eta - 1) ** 3 * f.B0_prime + (eta - 1) ** 2 * (6 - 4 * eta));
@@ -105,7 +128,7 @@ export function EosPane({ job }: { job: DftJob }) {
   const ref = (st as unknown as { reference?: EosFit & { source: string; a0_conventional_A?: number } } | undefined)?.reference;
   return (
     <div className="flex h-full flex-col">
-      <StudyHeader job={job} kind="eos" label="equation of state" note="7 volumes 94–106 %, Birch–Murnaghan; uses converged settings if available" />
+      <EosHeader job={job} />
       {!st ? <Empty title="No equation of state yet">Runs every installed code at seven volumes, fits V₀, B₀, B′ and compares codes
         with the Delta gauge (and with WIEN2k for elemental crystals).</Empty> : (
         <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3 text-xs">
@@ -158,3 +181,56 @@ export function EosPane({ job }: { job: DftJob }) {
   );
 }
 
+
+
+const RAMAN_CODES = [["espresso", "Quantum ESPRESSO"], ["gpaw", "GPAW"]] as const;
+
+export function RamanPane({ job }: { job: DftJob }) {
+  const qc = useQueryClient();
+  const studies = job.studies?.raman ?? {};
+  const [code, setCode] = useState<string>("espresso");
+  const [exp, setExp] = useState("");
+  const go = useMutation({ mutationFn: () => dft.startRaman(job.id, code), onSettled: () => qc.invalidateQueries({ queryKey: ["dft-job", job.id] }) });
+  const running = Object.values(studies).some((s) => s.status === "running" || s.status === "queued");
+  const expV = Number(exp) || null;
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-xs">
+        <span className="text-muted">Γ phonons by finite displacements; Raman/IR activity from symmetry.</span>
+        <select value={code} onChange={(e) => setCode(e.target.value)} className="h-7 rounded border border-line-strong px-1.5">
+          {RAMAN_CODES.map(([c, l]) => <option key={c} value={c}>{l}</option>)}</select>
+        <label className="flex items-center gap-1 text-muted">measured (cm⁻¹)
+          <input className="h-7 w-20 rounded border border-line-strong px-1.5 font-mono" value={exp} onChange={(e) => setExp(e.target.value)} placeholder="optional" /></label>
+        {running && <span className="text-accent">{Object.values(studies).find((s) => s.status === "running")?.message || "running…"}</span>}
+        <Button size="sm" variant="secondary" className="ml-auto" disabled={running || go.isPending} onClick={() => go.mutate()}><Play size={11} /> Run Raman</Button>
+      </div>
+      {!Object.keys(studies).length ? <Empty title="No Raman calculation yet">Displaces each atom of the cell, computes forces with the chosen
+        code (one short run per displacement), builds the force constants with phonopy and finds the Γ modes. Symmetry decides which are
+        Raman- or IR-active.</Empty> : (
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3 text-xs">
+          <Chart xLabel="Raman shift (cm⁻¹)" yLabel="active modes (positions only)"
+            series={Object.entries(studies).filter(([, s]) => s.spectrum).map(([c, s]) => ({ name: c,
+              pts: s.spectrum!.x.map((x, i) => [x, s.spectrum!.y[i]] as [number, number]).filter((_, i) => i % 4 === 0) }))} />
+          {Object.entries(studies).map(([c, s]) => (
+            <div key={c} className="rounded-md border border-line">
+              <div className="flex items-center gap-2 border-b border-line px-2.5 py-1.5">
+                <span className="font-medium" style={{ color: color(c) }}>{c}</span>
+                <span className="text-muted">point group {s.point_group ?? "—"} · k {s.kmesh?.join("×")} · {s.n_displacements} displacement(s)</span>
+                {s.status !== "done" && <span className={s.status === "failed" ? "text-bad" : "text-accent"}>{s.status} {s.message}</span>}
+              </div>
+              {s.modes && <table className="tabular w-full">
+                <thead className="text-left text-[11px] text-muted"><tr><th className="px-2.5 py-1">ω (cm⁻¹)</th><th>irrep</th><th>degeneracy</th><th>Raman</th><th>IR</th>{expV && <th>vs measured</th>}</tr></thead>
+                <tbody className="divide-y divide-line">{s.modes.filter((m) => !m.acoustic).map((m, i) => (
+                  <tr key={i}><td className="px-2.5 py-1 font-mono">{m.frequency_cm1.toFixed(1)}</td><td>{m.label}</td><td>{m.degeneracy}</td>
+                    <td>{m.raman_active ? <Tag tone="ok">active</Tag> : <span className="text-faint">–</span>}</td>
+                    <td>{m.ir_active ? <Tag tone="run">active</Tag> : <span className="text-faint">–</span>}</td>
+                    {expV && <td className="font-mono">{m.raman_active ? `${((m.frequency_cm1 / expV - 1) * 100).toFixed(1)} %` : ""}</td>}</tr>))}
+                </tbody></table>}
+              {s.notes && <p className="px-2.5 py-1.5 text-[10.5px] text-muted">{s.notes.join(" · ")}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

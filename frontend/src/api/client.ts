@@ -117,8 +117,17 @@ export interface DftJob {
   checks: { passed: boolean; results: DftCheck[]; reference: Record<string, any>; codes: Record<string, any> };
   runs: Record<string, DftRun>;
   plan: DftPlan | null;
-  studies: { convergence?: ConvergenceStudy; eos?: EosStudy };
+  studies: { convergence?: ConvergenceStudy; eos?: EosStudy; raman?: Record<string, RamanStudy> };
 }
+export interface RamanMode { frequency_cm1: number; degeneracy: number; label: string | null; acoustic: boolean; raman_active: boolean; ir_active: boolean }
+export interface RamanStudy { status: string; message?: string; code: string; kmesh?: number[]; point_group?: string; modes?: RamanMode[];
+  spectrum?: { x: number[]; y: number[]; fwhm_cm1: number; note: string }; notes?: string[]; n_displacements?: number }
+export interface Bridge { material: string; experiment_reference: string | null; notes: string[];
+  experiment: { run: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; classification: string | null }[];
+  certified: { dataset: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; source: string | null }[];
+  theory: { set: string; code: string; functional: string; a0_A: number; B0_GPa: number | null; kmesh: number[] | null;
+    vs_experiment_percent: number | null; pressure_equivalent_GPa?: number; reference?: string }[];
+  raman: { set: string; code: string; functional: string; frequency_cm1: number; label: string | null; raman_active: boolean; ir_active: boolean }[] }
 export interface StudyPoint { ok: boolean; e_per_atom_eV?: number; volume_per_atom_A3?: number; error?: string; scf_iterations?: number }
 export interface ConvergenceStudy { status: string; message?: string; criterion: string; tol_meV_per_atom: number;
   codes: Record<string, { kpoints: (StudyPoint & { kmesh: number[] })[]; basis: (StudyPoint & { basis_scale: number })[];
@@ -159,7 +168,13 @@ export const dft = {
   archiveUrl: (id: string) => `${API}/dft/jobs/${id}/archive`,
   targets: () => fetch(`${API}/dft/targets`).then(json<DftTarget[]>),
   tools: () => fetch(`${API}/dft/tools`).then(json<DftTools>),
-  startStudy: (id: string, kind: "convergence" | "eos") => fetch(`${API}/dft/jobs/${id}/studies/${kind}`, { method: "POST" }).then(json),
+  startStudy: (id: string, kind: "convergence" | "eos", kmesh?: number[] | null) => fetch(`${API}/dft/jobs/${id}/studies/${kind}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kmesh: kmesh ?? null }) }).then(json),
+  startRaman: (id: string, code: string, kmesh?: number[] | null) => fetch(`${API}/dft/jobs/${id}/studies/raman`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, kmesh: kmesh ?? null }) }).then(json),
+  planPreview: (material: string, functional: string) =>
+    fetch(`${API}/dft/plan-preview?material=${encodeURIComponent(material)}&functional=${functional}`).then(json<{ plan: DftPlan; material: MpMaterial }>),
+  bridge: (material: string) => fetch(`${API}/bridge?material=${encodeURIComponent(material)}`).then(json<Bridge>),
   saveEos: (id: string, code: string) => fetch(`${API}/dft/jobs/${id}/studies/eos/${code}/save`, { method: "POST" })
     .then(json<{ dataset: string }>),
   searchMaterials: (q: string) => fetch(`${API}/dft/materials?q=${encodeURIComponent(q)}`).then(json<MpMaterial[]>),
