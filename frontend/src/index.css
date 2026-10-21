@@ -1,21 +1,60 @@
 @import "tailwindcss";
 @import "@xyflow/react/dist/style.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
 
 @theme {
-  --color-ink: oklch(0.22 0.02 260);
-  --color-muted: oklch(0.55 0.02 260);
-  --color-line: oklch(0.91 0.01 260);
-  --color-panel: oklch(0.985 0.003 260);
-  --color-accent: oklch(0.55 0.17 255);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --color-canvas: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-subtle: #f1f3f6;
+  --color-line: #e2e5ea;
+  --color-line-strong: #cfd4dc;
+  --color-ink: #121826;
+  --color-ink-2: #3b4352;
+  --color-muted: #6b7484;
+  --color-faint: #9aa2b0;
+  --color-accent: #1f4fd1;
+  --color-accent-soft: #eaf0fd;
+  --color-ok: #17803d;
+  --color-ok-soft: #e9f6ee;
+  --color-warn: #a35b00;
+  --color-warn-soft: #fdf3e3;
+  --color-bad: #b42318;
+  --color-bad-soft: #fdecea;
+  --color-run: #1f4fd1;
 }
 
 html, body, #root { height: 100%; }
-body { @apply bg-white text-ink antialiased; font-family: ui-sans-serif, system-ui, sans-serif; }
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+.tabular { font-variant-numeric: tabular-nums; }
 
-.prose-report h1 { @apply text-lg font-semibold mb-2; }
-.prose-report h2 { @apply text-base font-semibold mt-4 mb-1; }
-.prose-report p, .prose-report li { @apply text-sm leading-6; }
-.prose-report ul { @apply list-disc pl-5; }
-.prose-report table { @apply text-xs border-collapse my-2; }
-.prose-report th, .prose-report td { @apply border border-line px-2 py-1; }
-.prose-report code { @apply bg-panel px-1 rounded text-xs; }
+/* Report typography */
+.doc h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 12px; }
+.doc h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--color-muted); margin: 22px 0 6px; }
+.doc p, .doc li { font-size: 13.5px; line-height: 1.65; color: var(--color-ink-2); }
+.doc ul { list-style: disc; padding-left: 18px; }
+.doc ol { list-style: decimal; padding-left: 18px; }
+.doc strong { color: var(--color-ink); font-weight: 600; }
+.doc code { font-family: var(--font-mono); font-size: 11.5px; background: var(--color-subtle);
+  border: 1px solid var(--color-line); border-radius: 4px; padding: 0 4px; }
+.doc table { border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+.doc th, .doc td { border-bottom: 1px solid var(--color-line); padding: 5px 12px 5px 0; text-align: left; }
+.doc th { color: var(--color-muted); font-weight: 500; }
+
+/* React Flow: quiet canvas */
+.react-flow__handle { opacity: 0; }
+.react-flow__edge-path { stroke: var(--color-line-strong); stroke-width: 1.5; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #d6dae1; border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }

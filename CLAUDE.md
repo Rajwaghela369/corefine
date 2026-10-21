@@ -10,7 +10,7 @@ Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified dev
 - `backend/skills/` — skill files loaded by name; `examples/gold_analysis.py` is the human-checked
   reference and its outputs are in `examples/gold_outputs/`.
 - `backend/tests/` — pytest; LLM calls mocked, everything else real (local mode).
-- `frontend/src/` — React + Vite + TS: `panels/`, `tabs/`, `api/`.
+- `frontend/src/` — React + Vite + TS: `views/` (Storage, Lab with 2×2 Plan/Plots/Data/Report panes), `panels/`, `components/` (header, sidebar, UI primitives), `api/`.
 - `data/` — seed dataset manifests and READMEs (raw files come from `backend/scripts/fetch_data.py`).
 
 ## Conventions

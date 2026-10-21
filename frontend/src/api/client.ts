@@ -55,8 +55,12 @@ export const api = {
       body: JSON.stringify(body) }).then(json<{ id: string }>),
   artifactText: (runId: string, path: string) => fetch(`${API}/runs/${runId}/artifacts/${path}`).then((r) => r.text()),
   artifactUrl: (runId: string, path: string) => `${API}/runs/${runId}/artifacts/${path}`,
+  health: () => fetch(`${API}/health`).then(json<Health>),
+  ping: () => fetch(`${API}/ping`).then(json<{ ok: boolean; mode: string }>),
   chatHistory: (session: string) => fetch(`${API}/chat/${session}`).then(json<ChatMessage[]>),
 };
+
+export interface Health { mode: string; all_ok: boolean; services: Record<string, { ok: boolean; detail: string }> }
 
 export interface SseEvent { event: string; data: any }
 
