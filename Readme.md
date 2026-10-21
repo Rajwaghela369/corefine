@@ -310,7 +310,7 @@ experimentalist who has never run DFT.
 - every XRD refinement CoRefine has run;
 - the a₀ from every code's equation of state, with each difference computed in code.
 
-For silicon, the four codes span 0.007 Å. The gap between PBE and experiment is about five times larger
+For silicon, the four codes span 0.007 Å. The gap between PBE and experiment is about six times larger
 than that spread: PBE overestimates a₀ by about 0.7 %, which is the textbook behaviour of the
 functional. The disagreement is the functional's, not any one code's.
 
