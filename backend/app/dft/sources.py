@@ -3,6 +3,7 @@
 Sources (the `source` string):
   path/to/file.cif     a local CIF
   cod:<id>             Crystallography Open Database, downloaded as CIF (open, no key)
+  dataset:<id>         a reference_structure dataset in CoRefine storage (its first .cif file)
   mp:<mp-id>           Materials Project, via its public OPTIMADE endpoint (no key needed);
                        with MP_API_KEY set, the official mp-api client is used instead if installed
 """
@@ -42,6 +43,8 @@ def load(source: str, cache_dir: Path | None = None) -> Sourced:
         return _from_cod(source[4:], cache_dir)
     if source.startswith("mp:"):
         return _from_mp(source[3:])
+    if source.startswith("dataset:"):
+        return _from_dataset(source[8:])
     p = Path(source).expanduser()
     if p.suffix.lower() == ".cif" and p.is_file():
         data = p.read_bytes()
@@ -108,3 +111,20 @@ def _from_mp(mp_id: str) -> Sourced:
                    declared_spacegroup=str(sg) if sg else None,
                    notes=["Materials Project structures are relaxed with GGA(+U); lattice constants are "
                           "typically larger than experiment for PBE."])
+
+
+def _from_dataset(dataset_id: str) -> Sourced:
+    from app.storage import datasets
+    from app.storage.objects import get_store
+
+    store = get_store()
+    try:
+        m = datasets.load_manifest(dataset_id, store)
+    except datasets.ManifestError as e:
+        raise SourceError(str(e)) from e
+    cifs = [k for k in datasets.dataset_files(m, store) if k.lower().endswith(".cif")]
+    if m.format != "cif" or not cifs:
+        raise SourceError(f"dataset {dataset_id!r} has no structure CIF (format {m.format})")
+    s = _from_cif_bytes(store.get(cifs[0]), source=f"dataset:{dataset_id}", url=m.source)
+    s.notes.append(f"from storage file {cifs[0]}")
+    return s

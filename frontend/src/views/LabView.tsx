@@ -1,16 +1,45 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileClock, Maximize2, Minimize2 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { FileClock } from "lucide-react";
+import { useState } from "react";
 import { api, type RunDetail } from "../api/client";
+import { Quadrants } from "../components/Quadrants";
 import { Button, Empty, Status, Tag, type Tone, clock, cn, duration, fixed, num } from "../components/ui";
 import { ChatPanel, ClaimBadge } from "../panels/ChatPanel";
 import { RunsList } from "../panels/RunsList";
 import { useRunEvents } from "../useRunEvents";
+import { DftView } from "./DftView";
 import { DataPane, PlanPane, PlotsPane, ReportPane } from "./Panes";
 
-type Quadrant = "plan" | "plots" | "data" | "report";
-
 export function LabView({ session, runId, setRunId, selected, toggle }: {
+  session: string; runId: string | null; setRunId: (id: string | null) => void;
+  selected: Set<string>; toggle: (id: string) => void;
+}) {
+  const params = new URLSearchParams(window.location.search);
+  const [mode, setMode] = useState<"xrd" | "dft">(params.get("mode") === "dft" ? "dft" : "xrd");
+  const [jobId, setJobId] = useState<string | null>(params.get("job"));
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-faint">Workflow</span>
+        <div className="flex rounded-md border border-line-strong p-0.5">
+          {([["xrd", "XRD refinement"], ["dft", "DFT inputs"]] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setMode(m)} className={cn("rounded px-3 py-1 text-xs",
+              mode === m ? "bg-ink font-medium text-white" : "text-muted hover:text-ink")}>{label}</button>
+          ))}
+        </div>
+        <span className="text-[11px] text-muted">{mode === "xrd"
+          ? "Measured pattern → agents write and run the analysis → traced report"
+          : "Structure → inputs for every configured all-electron code → read-back checks"}</span>
+      </div>
+      <div className="min-h-0 flex-1">
+        {mode === "xrd" ? <XrdLab session={session} runId={runId} setRunId={setRunId} selected={selected} toggle={toggle} />
+          : <DftView jobId={jobId} setJobId={setJobId} />}
+      </div>
+    </div>
+  );
+}
+
+function XrdLab({ session, runId, setRunId, selected, toggle }: {
   session: string; runId: string | null; setRunId: (id: string | null) => void;
   selected: Set<string>; toggle: (id: string) => void;
 }) {
@@ -90,33 +119,17 @@ function Stat({ label, value, unit, sub }: { label: string; value: string; unit:
 }
 
 function Workspace({ run }: { run: RunDetail }) {
-  const [max, setMax] = useState<Quadrant | null>(null);
   const [log, setLog] = useState(false);
-  const panes: Record<Quadrant, { title: string; body: ReactNode; extra?: ReactNode }> = {
-    plan: { title: "Plan", body: <PlanPane run={run} logOpen={log} onLogClose={() => setLog(false)} />,
-      extra: <Button size="sm" variant="ghost" onClick={() => setLog(true)} title="Experiment log"><FileClock size={13} /> Log</Button> },
-    plots: { title: "Plots", body: <PlotsPane run={run} /> },
-    data: { title: "Data", body: <DataPane run={run} /> },
-    report: { title: "Report", body: <ReportPane run={run} /> },
-  };
-  const order: Quadrant[] = ["plan", "plots", "data", "report"];
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Summary run={run} />
-      <div className={cn("grid min-h-0 flex-1 gap-3 p-3", max ? "grid-cols-1 grid-rows-1" : "grid-cols-2 grid-rows-2")}>
-        {order.filter((q) => !max || q === max).map((q) => (
-          <section key={q} className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-[0_1px_2px_rgba(16,24,40,.04)]">
-            <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line pl-3 pr-1.5">
-              <h2 className="text-xs font-semibold">{panes[q].title}</h2>
-              <div className="ml-auto flex items-center">{panes[q].extra}
-                <Button size="sm" variant="ghost" onClick={() => setMax(max ? null : q)} title={max ? "Restore" : "Maximise"} aria-label={max ? "Restore" : "Maximise"}>
-                  {max ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</Button>
-              </div>
-            </header>
-            <div className="min-h-0 flex-1 overflow-auto">{panes[q].body}</div>
-          </section>
-        ))}
-      </div>
+      <Quadrants panes={[
+        { key: "plan", title: "Plan", body: <PlanPane run={run} logOpen={log} onLogClose={() => setLog(false)} />,
+          extra: <Button size="sm" variant="ghost" onClick={() => setLog(true)} title="Experiment log"><FileClock size={13} /> Log</Button> },
+        { key: "plots", title: "Plots", body: <PlotsPane run={run} /> },
+        { key: "data", title: "Data", body: <DataPane run={run} /> },
+        { key: "report", title: "Report", body: <ReportPane run={run} /> },
+      ]} />
     </div>
   );
 }

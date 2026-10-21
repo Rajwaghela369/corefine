@@ -2,8 +2,7 @@
 
 Writes, under the output folder:
   structure/   the source file (CIF or OPTIMADE JSON summary) and the standardized cell
-  exciting/    input.xml + species files
-  questaal/    init.<ext>, ctrl.<ext>, site.<ext>, basp, atm and the blm/lmfa/lmchk logs
+  <code>/      one folder per code adapter (e.g. exciting/input.xml + species, questaal/init + ctrl + logs)
   provenance.json, checks.json, SUMMARY.md
 """
 
@@ -16,7 +15,8 @@ from pathlib import Path
 from ase.io import write as ase_write
 
 from app.config import get_settings
-from app.dft import checks, exciting, questaal, sources, structure
+from app.dft import checks, sources, structure
+from app.dft.codes import REGISTRY, available
 from app.dft.request import CalcRequest
 
 
@@ -35,17 +35,27 @@ def _git_describe(path: Path | None) -> str | None:
 
 
 def prepare(req: CalcRequest, outdir: Path) -> dict:
+    s = get_settings()
+    codes = req.codes or available(s)
+    req = req.model_copy(update={"codes": codes})
     problems = req.unsupported()
+    if not codes:
+        problems.append("no DFT code is configured on this server")
+    for name in codes:
+        adapter = REGISTRY.get(name)
+        if adapter is None:
+            problems.append(f"unknown code {name!r}; registered: {sorted(REGISTRY)}")
+            continue
+        ok, reason = adapter.availability(s)
+        if not ok:
+            problems.append(f"{adapter.label} is not available here: {reason}")
+        problems += adapter.problems(req)
     if problems:
         raise RequestError("; ".join(problems))
-    s = get_settings()
     outdir.mkdir(parents=True, exist_ok=True)
 
     src = sources.load(req.structure, cache_dir=s.LOCAL_DATA_DIR / "structures")
     cell = structure.standard_primitive(src.atoms)
-    # Questaal file extension from the empirical formula: Si2 -> si, Al4O6 -> al2o3
-    empirical = cell.atoms.get_chemical_formula(mode="metal", empirical=True).lower()
-    ext = "".join(c for c in empirical if c.isalnum())[:12] or "crystal"
     title = f"{cell.atoms.get_chemical_formula(mode='metal')} {req.functional} {req.task} from {req.structure}"
 
     sdir = outdir / "structure"
@@ -53,30 +63,22 @@ def prepare(req: CalcRequest, outdir: Path) -> dict:
     ase_write(sdir / "source_cell.cif", src.atoms, format="cif")
     ase_write(sdir / "primitive_standard.cif", cell.atoms, format="cif")
 
-    generated, e_back, e_schema, q_back = {}, None, None, None
-    if "exciting" in req.codes:
-        if not s.EXCITING_ROOT:
-            raise RequestError("EXCITING_ROOT is not set; cannot find exciting species files and schema")
-        generated["exciting"] = exciting.write(cell, req, outdir / "exciting", s.EXCITING_ROOT, title)
-        e_schema = exciting.validate(outdir / "exciting", s.EXCITING_ROOT)
-        e_back = exciting.read_back(outdir / "exciting")
-    if "questaal" in req.codes:
-        if not s.QUESTAAL_BIN:
-            raise RequestError("QUESTAAL_BIN is not set; cannot run blm")
-        generated["questaal"] = questaal.write(cell, req, outdir / "questaal", s.QUESTAAL_BIN, s.QUESTAAL_LIB_ROOT, ext, title)
-        q_back = questaal.read_back(outdir / "questaal", ext)
+    generated, read_backs = {}, {}
+    for name in codes:
+        adapter = REGISTRY[name]
+        generated[name] = {"label": adapter.label, "method": adapter.method, "main_file": adapter.main_file,
+                           **adapter.write(cell, req, outdir / name, s, title)}
+        read_backs[name] = adapter.read_back(outdir / name, req)
 
-    report = checks.run_checks(cell, req, src.declared_spacegroup, e_back, e_schema, q_back)
+    report = checks.run_checks(cell, req, src.declared_spacegroup, read_backs)
     provenance = {
         "created": datetime.now(UTC).isoformat(timespec="seconds"),
         "request": req.model_dump(),
         "source": {"source": src.source, "url": src.url, "sha256": src.sha256,
                    "declared_spacegroup": src.declared_spacegroup, "notes": src.notes},
         "cell": cell.summary(),
-        "codes": {"exciting": {"tree": str(s.EXCITING_ROOT) if s.EXCITING_ROOT else None,
-                               "version": _git_describe(s.EXCITING_ROOT)},
-                  "questaal": {"bin": str(s.QUESTAAL_BIN) if s.QUESTAAL_BIN else None,
-                               "version": _git_describe(s.QUESTAAL_BIN.parent if s.QUESTAAL_BIN else None)}},
+        "code_versions": {"exciting": _git_describe(s.EXCITING_ROOT) if "exciting" in codes else None,
+                          "questaal": _git_describe(s.QUESTAAL_BIN.parent) if "questaal" in codes and s.QUESTAAL_BIN else None},
         "generated": generated,
         "host": platform.node(),
     }
@@ -96,12 +98,9 @@ def summary_markdown(prov: dict, report: dict) -> str:
              f"## Sanity checks: {'all passed' if report['passed'] else 'FAILED'}", "", "| | check | detail |", "|---|---|---|"]
     lines += [f"| {'✓' if x['ok'] else '✗'} | {x['check']} | {x['detail']} |" for x in report["results"]]
     for code, g in prov["generated"].items():
-        lines += ["", f"## {code}", "", f"Set explicitly: {g['set_explicitly']}", ""]
-        if code == "exciting":
-            defaults = ", ".join(f"{k}={v}" for k, v in g["defaults_from_schema"].items())
-            lines.append(f"Left at exciting's schema defaults: {defaults}")
-        if code == "questaal":
-            lines.append(f"{g['defaults']}; gmax = {g['gmax']['value']} ({g['gmax']['source']})")
+        defaults = ", ".join(f"{k}={v}" for k, v in g["defaults"]["values"].items())
+        lines += ["", f"## {g['label']} ({g['method']})", "", f"Set explicitly: {g['set_explicitly']}", "",
+                  f"Code defaults ({g['defaults']['source']}): {defaults}"]
     for n in prov["source"]["notes"]:
         lines += ["", f"> Note: {n}"]
     return "\n".join(lines) + "\n"

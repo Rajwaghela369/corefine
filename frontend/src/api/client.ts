@@ -99,3 +99,38 @@ export function sessionId(): string {
     return "session-" + Math.random().toString(36).slice(2, 12);
   }
 }
+
+// --- All-electron DFT inputs ------------------------------------------------
+
+export interface DftCheck { check: string; ok: boolean; detail: string }
+export interface DftJobListItem { id: string; created: string; structure: string; formula: string; functional: string;
+  kmesh: number[]; codes: string[]; passed: boolean; n_checks: number; n_failed: number }
+export interface DftCell { formula: string; natoms: number; spacegroup: string; volume_A3: number;
+  volume_per_atom_A3: number; lattice_lengths_A: number[]; nearest_neighbour_A: number }
+export interface DftJob {
+  id: string; files: string[];
+  provenance: { created: string; request: { structure: string; codes: string[]; functional: string; kmesh: number[]; notes: string };
+    source: { source: string; url: string | null; sha256: string | null; declared_spacegroup: string | null; notes: string[] };
+    cell: DftCell; code_versions: Record<string, string | null>;
+    generated: Record<string, { label: string; method: string; main_file: string; files: string[];
+      set_explicitly: Record<string, string>; defaults: { source: string; values: Record<string, unknown> } }> };
+  checks: { passed: boolean; results: DftCheck[]; reference: Record<string, any>; codes: Record<string, any> };
+}
+export interface DftCode { name: string; label: string; method: string; available: boolean; reason: string; functionals: string[] }
+export interface DftJobBody { prompt?: string; structure?: string; codes?: string[]; functional?: string; kmesh?: number[] }
+
+export const dft = {
+  config: () => fetch(`${API}/dft/config`).then(json<{ codes: DftCode[]; prompt: boolean }>),
+  jobs: () => fetch(`${API}/dft/jobs`).then(json<DftJobListItem[]>),
+  job: (id: string) => fetch(`${API}/dft/jobs/${id}`).then(json<DftJob>),
+  create: (body: DftJobBody) => fetch(`${API}/dft/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) }).then(json<{ id: string; passed: boolean }>),
+  file: (id: string, path: string) => fetch(`${API}/dft/jobs/${id}/files/${path}`).then((r) => r.text()),
+  fileUrl: (id: string, path: string) => `${API}/dft/jobs/${id}/files/${path}`,
+  archiveUrl: (id: string) => `${API}/dft/jobs/${id}/archive`,
+  upload: (f: File) => {
+    const fd = new FormData();
+    fd.append("file", f);
+    return fetch(`${API}/dft/upload`, { method: "POST", body: fd }).then(json<{ structure: string; name: string; cell: DftCell }>);
+  },
+};

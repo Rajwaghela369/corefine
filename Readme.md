@@ -103,25 +103,33 @@ the spec errors found while building, and the design decisions.
 - NIST SRM 640f certificate (26 Feb 2019): certified value and the Table 1 wavelength.
 - COD 9008565, silicon (Wyckoff), [crystallography.net](https://www.crystallography.net/cod/9008565.html).
 
-## All-electron DFT inputs (exciting + Questaal)
+## DFT inputs for any code (Lab → DFT inputs)
 
-`backend/app/dft/` turns a structure into checked ground-state inputs for exciting (LAPW+lo) and
-Questaal (FP-LMTO). Code writes every input; the LLM only turns a plain-language request into typed
-settings.
+`backend/app/dft/` turns a structure into checked ground-state inputs for every DFT code configured
+on the server. Code writes every input; the LLM only turns a plain-language request into typed
+settings. It is built to be shared: no machine-specific paths in the code, and each code is a plug-in.
+
+**Codes are adapters.** `app/dft/codes/` holds one module per code implementing `CodeAdapter`
+(`codes/base.py`): whether the code is usable on this server, which functionals it maps, how to write
+its input, and how to read that input back the way the code itself will. Register it in
+`codes/__init__.py`, and the request API, the checks and the UI pick it up automatically. Shipped:
+exciting (FP-(L)APW+lo) and Questaal (FP-LMTO). Settings a request does not specify are left at
+the code's own documented defaults, and the adapter reports them.
 
 ```bash
 cd backend
 uv run python scripts/dft_inputs.py --source cod:9008565 --xc PBE --kmesh 2 2 2 --out runs/si-pbe
-uv run python scripts/dft_inputs.py --source mp:mp-149 --out runs/si-mp        # Materials Project via OPTIMADE, no key
+uv run python scripts/dft_inputs.py --source mp:mp-149 --codes exciting --out runs/si-mp
 uv run python scripts/dft_inputs.py --prompt "DFT PBE for Si (mp-149), simple 2x2x2 k-mesh, normal inputs" --out runs/si
 ```
 
-Sources: a local `.cif`, `cod:<id>` or `mp:<mp-id>`. The structure is reduced to the standard
-primitive cell (spglib). exciting gets `input.xml` with the species files copied alongside, validated
-against exciting's own schema. Questaal gets `init.<ext>`, then Questaal's `blm --express`, `lmfa`
-(which sets gmax) and `lmchk` run locally. Each input is then read back as its code would read it
-and compared: formula, space group, volume per atom, nearest-neighbour distance, k-mesh, functional,
-Questaal's own symmetry count and sphere overlaps. Results go to `checks.json`, `provenance.json` and
-`SUMMARY.md`. "Normal inputs" means each code's documented defaults, and the summary lists them.
+Sources: a local `.cif`, `cod:<id>`, `mp:<mp-id>` (Materials Project via its public OPTIMADE endpoint,
+no key) or `dataset:<id>` (a structure in CoRefine storage). The structure is reduced to the standard
+primitive cell (spglib). Then every input is read back and compared with the source and with the other
+codes: formula, space group, volume per atom, nearest-neighbour distance, k-mesh, functional, plus
+each code's own checks (exciting: schema validation; Questaal: `lmchk` symmetry and sphere overlap).
+Output: one folder per code, plus `checks.json`, `provenance.json` and `SUMMARY.md`, downloadable as a zip.
 
-Set `EXCITING_ROOT`, `QUESTAAL_BIN` and (for Spack builds) `QUESTAAL_LIB_ROOT` in `backend/.env`.
+Configure the codes you have in `backend/.env`: `EXCITING_ROOT` (exciting tree: species + schema),
+`QUESTAAL_BIN` (blm, lmfa, lmchk) and, for Spack builds, `QUESTAAL_LIB_ROOT`. Codes left unset are
+shown as unavailable, with the reason.

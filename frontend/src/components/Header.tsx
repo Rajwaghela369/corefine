@@ -44,7 +44,7 @@ export function Header() {
       <span className="h-5 w-px bg-line" />
       <nav className="flex items-center gap-1 text-[13px] text-muted">
         <span>Workspace</span><span className="text-faint">/</span>
-        <span className="font-medium text-ink">Powder diffraction · Si lattice parameter</span>
+        <span className="font-medium text-ink">Materials workflows</span>
       </nav>
       <div className="ml-auto flex items-center gap-3">
         <span className={cn("rounded border px-1.5 py-px font-mono text-[11px] uppercase tracking-wide",

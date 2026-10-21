@@ -11,7 +11,7 @@ Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified dev
   reference and its outputs are in `examples/gold_outputs/`.
 - `backend/tests/` — pytest; LLM calls mocked, everything else real (local mode).
 - `frontend/src/` — React + Vite + TS: `views/` (Storage, Lab with 2×2 Plan/Plots/Data/Report panes), `panels/`, `components/` (header, sidebar, UI primitives), `api/`.
-- `backend/app/dft/` — CIF/COD/Materials Project → standard cell → exciting + Questaal inputs → read-back checks (`scripts/dft_inputs.py`).
+- `backend/app/dft/` — structure (CIF/COD/Materials Project/storage) → standard cell → inputs for every registered code adapter (`codes/`) → read-back checks. New code = new `CodeAdapter` + one registry line. API `/dft/*`, CLI `scripts/dft_inputs.py`.
 - `data/` — seed dataset manifests and READMEs (raw files come from `backend/scripts/fetch_data.py`).
 
 ## Conventions
@@ -27,6 +27,7 @@ Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified dev
 - Pydantic models for every contract. Tests with pytest. Mock the LLM and sandbox in unit tests; mark
   tests that hit real services with `@pytest.mark.integration`.
 - Backend Python 3.14 with uv (`backend/pyproject.toml`); sandbox Python 3.13 (Daytona's maximum).
+- Built for everyone: no machine- or cluster-specific paths or assumptions in code; site paths go in `.env`.
 - Verify physics claims against data or the certificate; never invent wavelengths, reference values
   or file tags.
 

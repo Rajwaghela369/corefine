@@ -53,7 +53,7 @@ markers = ["integration: hits real cloud services (skipped by default)"]
 addopts = "-m 'not integration'"
 
 [tool.ruff]
-line-length = 130
+line-length = 140
 target-version = "py314"
 
 [tool.ruff.lint]

@@ -52,6 +52,13 @@ def spacegroup_of(atoms: Atoms, symprec: float = SYMPREC) -> tuple[int, str]:
     return int(ds.number), str(ds.international)
 
 
+def spacegroup_operations(atoms: Atoms, symprec: float = SYMPREC) -> int:
+    ds = spglib.get_symmetry_dataset((atoms.cell[:], atoms.get_scaled_positions(), atoms.numbers), symprec=symprec)
+    if ds is None:
+        raise SymmetryError("spglib could not determine the symmetry")
+    return len(ds.rotations)
+
+
 def standard_primitive(atoms: Atoms, symprec: float = SYMPREC) -> Cell:
     cell = (atoms.cell[:], atoms.get_scaled_positions(), atoms.numbers)
     std = spglib.standardize_cell(cell, to_primitive=True, no_idealize=False, symprec=symprec)
