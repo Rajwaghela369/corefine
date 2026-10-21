@@ -4,13 +4,17 @@ import "uplot/dist/uPlot.min.css";
 import type { XrdPeak } from "../api/client";
 
 export interface Overlay { label: string; color: string; peaks: XrdPeak[] }
+export interface Curve { label: string; color: string; x: number[]; y: number[] }
 
 /** Measured scan as a line; simulated reflections as sticks (height = relative intensity) with hkl labels.
  *  Drag to zoom, double-click to reset. */
-export function XrdChart({ x, y, overlays, log, height = 320 }: { x: number[]; y: number[]; overlays: Overlay[]; log: boolean; height?: number }) {
+export function XrdChart({ x, y, overlays, log, height = 320, curves = [] }:
+  { x: number[]; y: number[]; overlays: Overlay[]; log: boolean; height?: number; curves?: Curve[] }) {
   const el = useRef<HTMLDivElement>(null);
   const overlaysRef = useRef(overlays);
   overlaysRef.current = overlays;
+  const curvesRef = useRef(curves);
+  curvesRef.current = curves;
   useEffect(() => {
     if (!el.current) return;
     const hasData = x.length > 0;
@@ -27,6 +31,19 @@ export function XrdChart({ x, y, overlays, log, height = 320 }: { x: number[]; y
       hooks: {
         draw: [(u) => {
           const ctx = u.ctx;
+          // profile curves, scaled so their maximum equals the measured maximum
+          const ymax = y.length ? Math.max(...y) : 1;
+          for (const c of curvesRef.current) {
+            const cmax = Math.max(...c.y) || 1;
+            ctx.save(); ctx.strokeStyle = c.color; ctx.lineWidth = 1.2 * devicePixelRatio; ctx.setLineDash([5, 3]);
+            ctx.beginPath();
+            c.x.forEach((xv, i) => {
+              const yv = Math.max((c.y[i] / cmax) * ymax, log ? 1e-3 : 0);
+              const px = u.valToPos(xv, "x", true), py = u.valToPos(yv, "y", true);
+              if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            });
+            ctx.stroke(); ctx.restore();
+          }
           const { top, height: h } = u.bbox;
           overlaysRef.current.forEach((o, k) => {
             ctx.save();
@@ -48,6 +65,6 @@ export function XrdChart({ x, y, overlays, log, height = 320 }: { x: number[]; y
     const ro = new ResizeObserver(() => el.current && plot.setSize({ width: el.current.clientWidth, height }));
     ro.observe(el.current);
     return () => { ro.disconnect(); plot.destroy(); };
-  }, [x, y, log, height, overlays]);
+  }, [x, y, log, height, overlays, curves]);
   return <div ref={el} className="w-full" />;
 }

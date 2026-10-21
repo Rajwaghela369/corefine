@@ -1,7 +1,9 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api, xrd, type XrdSimulated } from "../api/client";
-import { type Overlay, XrdChart } from "../components/XrdChart";
+import { type Curve, type Overlay, XrdChart } from "../components/XrdChart";
+import { XrdTheory } from "./XrdTheory";
+import type { XrdCompare } from "../api/client";
 import { Button, cn } from "../components/ui";
 
 const COLORS = ["#c2410c", "#15803d", "#7c3aed", "#b45309", "#0e7490"];
@@ -15,6 +17,8 @@ export function XrdInspector({ datasetId, measured }: { datasetId: string; measu
   const all = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
   const structures = (all.data ?? []).filter((d) => d.valid && d.role === "reference_structure");
   const [sims, setSims] = useState<(XrdSimulated & { color: string })[]>([]);
+  const [fitted, setFitted] = useState<XrdCompare | null>(null);
+  const curves: Curve[] = fitted ? [{ label: `fitted ${fitted.model}`, color: "#c2410c", x: fitted.profile.x, y: fitted.profile.y }] : [];
   const [pick, setPick] = useState("");
   const [mp, setMp] = useState("");
   const [scale, setScale] = useState("1.0");
@@ -50,7 +54,7 @@ export function XrdInspector({ datasetId, measured }: { datasetId: string; measu
       <div className="px-2 pt-2">
         {measured && m.isLoading && <p className="p-6 text-xs text-muted">Loading scan…</p>}
         {measured && m.isError && <p className="p-3 text-xs text-bad">{String(m.error)}</p>}
-        {(!measured || m.data) && <XrdChart x={m.data?.x ?? []} y={m.data?.y ?? []} overlays={overlays} log={measured && log} />}
+        {(!measured || m.data) && <XrdChart x={m.data?.x ?? []} y={m.data?.y ?? []} overlays={overlays} log={measured && log} curves={curves} />}
         <p className="px-1 pb-1 text-[10.5px] text-faint">Drag to zoom, double-click to reset. Sticks: kinematic intensities, no instrument profile.</p>
       </div>
       <div className="space-y-2 border-t border-line px-3 py-2.5">
@@ -77,8 +81,13 @@ export function XrdInspector({ datasetId, measured }: { datasetId: string; measu
               {i >= (measured ? 0 : 1) && <button className="text-faint hover:text-ink" onClick={() => setSims((s) => s.filter((_, j) => j !== i - (measured ? 0 : 1)))}>×</button>}
             </span>
           ))}
+          {fitted && <span className="inline-flex items-center gap-1.5 rounded border border-line px-1.5 py-0.5 text-[11px]">
+            <span className="h-0 w-3 border-t-2 border-dashed" style={{ borderColor: "#c2410c" }} />fitted {fitted.model}
+            <button className="text-faint hover:text-ink" onClick={() => setFitted(null)}>×</button></span>}
         </div>
       </div>
+      {measured && m.data && m.data.wavelength_A && <XrdTheory datasetId={datasetId} file={m.data.file} wavelength={m.data.wavelength_A}
+        onProfile={setFitted} onOverlay={(o) => setSims((s) => [...s, { label: o.label, color: o.color, peaks: o.peaks, wavelength_A: 0, note: "" }])} />}
     </div>
   );
 }

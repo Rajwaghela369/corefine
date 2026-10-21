@@ -2,9 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Background, Handle, type Node, type NodeProps, Position, ReactFlow } from "@xyflow/react";
 import { Download, ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
+import { type Overlay, XrdChart } from "../components/XrdChart";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, type RunDetail, type Step } from "../api/client";
+import { api, xrd, type RunDetail, type Step } from "../api/client";
 import { Dialog, Empty, Status, Tag, cn, num } from "../components/ui";
 import { ClaimBadge } from "../panels/ChatPanel";
 
@@ -116,20 +117,50 @@ function FileText({ runId, path, markdown }: { runId: string; path: string; mark
 export function PlotsPane({ run }: { run: RunDetail }) {
   const pngs = latest(run, ".png");
   const [i, setI] = useState(0);
-  if (!pngs.length) return <Empty title="No plots yet">Plots appear when a step writes a PNG to its outputs.</Empty>;
+  const all = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
+  const measuredId = run.dataset_ids.find((id) => all.data?.find((d) => d.id === id)?.role === "measured_pattern");
+  const peaksPath = latest(run, ".csv").find((p) => p.endsWith("peaks.csv"));
+  if (!pngs.length && !measuredId) return <Empty title="No plots yet">Plots appear when a step writes a PNG to its outputs.</Empty>;
   const path = pngs[Math.min(i, pngs.length - 1)];
   const art = run.artifacts.find((a) => a.path === path);
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-surface p-2">
-        <img src={api.artifactUrl(run.id, path)} alt={path} className="max-h-full max-w-full object-contain" />
-      </div>
-      <div className="flex items-center gap-2 border-t border-line px-3 py-1.5">
-        {pngs.length > 1 && pngs.map((p, k) => <button key={p} onClick={() => setI(k)}
-          className={cn("rounded px-1.5 py-0.5 font-mono text-[11px]", k === i ? "bg-accent-soft text-accent" : "text-muted hover:text-ink")}>{p.split("/").pop()}</button>)}
-        <span className="font-mono text-[10.5px] text-faint">{path} · sha256 {art?.sha256.slice(0, 10)}</span>
-        <a href={api.artifactUrl(run.id, path)} target="_blank" rel="noreferrer" className="ml-auto text-muted hover:text-accent" title="Open full size"><ExternalLink size={13} /></a>
-      </div>
+    <div className="flex h-full flex-col overflow-auto">
+      {measuredId && <InteractiveRunPlot runId={run.id} datasetId={measuredId} peaksPath={peaksPath} />}
+      {path && <>
+        <div className="flex items-center justify-center bg-surface p-2">
+          <img src={api.artifactUrl(run.id, path)} alt={path} className="max-h-[420px] max-w-full object-contain" />
+        </div>
+        <div className="flex items-center gap-2 border-t border-line px-3 py-1.5">
+          {pngs.length > 1 && pngs.map((p, k) => <button key={p} onClick={() => setI(k)}
+            className={cn("rounded px-1.5 py-0.5 font-mono text-[11px]", k === i ? "bg-accent-soft text-accent" : "text-muted hover:text-ink")}>{p.split("/").pop()}</button>)}
+          <span className="font-mono text-[10.5px] text-faint">{path} (the step's own figure) · sha256 {art?.sha256.slice(0, 10)}</span>
+          <a href={api.artifactUrl(run.id, path)} target="_blank" rel="noreferrer" className="ml-auto text-muted hover:text-accent" title="Open full size"><ExternalLink size={13} /></a>
+        </div>
+      </>}
+    </div>
+  );
+}
+
+/** The measured scan with the run's fitted peak centres (from its peaks.csv) as labelled sticks; zoomable. */
+function InteractiveRunPlot({ runId, datasetId, peaksPath }: { runId: string; datasetId: string; peaksPath?: string }) {
+  const m = useQuery({ queryKey: ["xrd-measured", datasetId, undefined], queryFn: () => xrd.measured(datasetId) });
+  const csv = useQuery({ queryKey: ["file", runId, peaksPath], queryFn: () => api.artifactText(runId, peaksPath!), enabled: !!peaksPath });
+  const overlays: Overlay[] = useMemo(() => {
+    if (!csv.data) return [];
+    const [head, ...rows] = csv.data.trim().split("\n").map((l) => l.split(","));
+    const col = (n: string) => head.indexOf(n);
+    const tt = col("two_theta_fit") >= 0 ? col("two_theta_fit") : col("two_theta_obs");
+    if (tt < 0) return [];
+    const peaks = rows.map((r) => ({ two_theta: Number(r[tt]), intensity: 60, d_A: 0, multiplicity: 1,
+      hkl: col("h") >= 0 ? `${r[col("h")]} ${r[col("k")]} ${r[col("l")]}` : "" }));
+    return [{ label: "fitted peaks (this run)", color: "#c2410c", peaks }];
+  }, [csv.data]);
+  if (!m.data) return <p className="p-3 text-xs text-muted">Loading the measured scan…</p>;
+  return (
+    <div className="border-b border-line px-2 pt-2">
+      <XrdChart x={m.data.x} y={m.data.y} overlays={overlays} log height={260} />
+      <p className="px-1 pb-1 text-[10.5px] text-faint">{datasetId}/{m.data.file} with this run's fitted peak positions. Drag to zoom, double-click to reset;
+        the XRD inspector in Storage compares any model structure.</p>
     </div>
   );
 }

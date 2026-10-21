@@ -181,7 +181,25 @@ export const dft = {
   },
 };
 
+export interface XrdMatch { hkl: string; two_theta_obs: number; two_theta_model: number; two_theta_fit: number;
+  delta_model_deg: number; residual_deg: number; rel_intensity_obs: number; rel_intensity_model: number }
+export interface XrdCompare { file: string; wavelength_A: number; n_matched: number; n_measured: number; lattice_scale: number;
+  linear_strain_percent: number; volume_ratio: number; zero_shift_deg: number; rms_residual_deg: number | null; tol_deg: number;
+  pressure_equivalent_GPa?: number; pressure_note?: string; bulk_modulus_source: string | null; matched: XrdMatch[];
+  unmatched_measured: number[]; model_lattice_A: number[]; implied_lattice_A: number[]; model: string;
+  model_meta: Record<string, unknown>; profile: { x: number[]; y: number[]; fwhm_deg: number; note: string };
+  model_reflections: XrdPeak[]; measured_peaks: { two_theta: number; fwhm: number; rel_intensity: number }[] }
+export interface XrdIdentify { file: string; formula: string; n_peaks: number; ranked: { candidate: string; explained_fraction: number;
+  n_matched: number; n_strong: number; lattice_scale: number; rms_residual_deg: number | null; strong_model_lines_missing: string[];
+  score: number; material: MpMaterial }[] }
+
 export const xrd = {
+  compare: (body: { dataset: string; file?: string; structure: string; volume_scale?: number; bulk_modulus_GPa?: number }) =>
+    fetch(`${API}/xrd/compare`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(json<XrdCompare>),
+  identify: (body: { dataset: string; file?: string; formula?: string }) =>
+    fetch(`${API}/xrd/identify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(json<XrdIdentify>),
   measured: (id: string, file?: string) =>
     fetch(`${API}/xrd/measured/${id}${file ? `?file=${encodeURIComponent(file)}` : ""}`).then(json<XrdMeasured>),
   simulate: (body: { structure: string; wavelength_A: number; two_theta_min?: number; two_theta_max?: number; volume_scale?: number }) =>

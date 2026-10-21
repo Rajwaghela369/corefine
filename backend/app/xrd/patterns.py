@@ -103,3 +103,24 @@ def atoms_from_dataset(dataset_id: str) -> Atoms:
     from app.dft import sources
 
     return sources.load(f"dataset:{dataset_id}").atoms
+
+
+def measured_full(dataset_id: str, file: str | None = None):
+    """Full-resolution scan (x, y, wavelength, file) for analysis; same reading rules as measured()."""
+    store = get_store()
+    m = datasets.load_manifest(dataset_id, store)
+    keys = datasets.dataset_files(m, store)
+    key = next((k for k in keys if k.endswith("/" + file)), None) if file else (keys[0] if keys else None)
+    if key is None or m.format != "pdcif":
+        raise PatternError("analysis currently reads powder-CIF (pdcif) scans")
+    doc = gemmi.cif.read_string(sanitize_pdcif(store.get(key).decode("utf-8", errors="replace"))[0])
+    block = next((b for b in doc if b.find_values("_pd_proc_2theta_corrected") or b.find_values("_pd_meas_2theta_scan")), None)
+    if block is None:
+        raise PatternError("no 2θ loop in the file")
+    tag = "_pd_proc_2theta_corrected" if block.find_values("_pd_proc_2theta_corrected") else "_pd_meas_2theta_scan"
+    ytag = next(t for t in ("_pd_proc_intensity_total", "_pd_meas_counts_total", "_pd_meas_intensity_total") if block.find_values(t))
+    wl = m.instrument.wavelength_A if m.instrument else None
+    if not wl:
+        raise PatternError(f"{dataset_id} has no wavelength in its manifest")
+    return (np.array(block.find_values(tag), float), np.array(block.find_values(ytag), float), float(wl),
+            key.rsplit("/", 1)[-1], m)
