@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, XCircle } from "lucide-react";
+import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, X, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, dft, type DftJob, type MpMaterial } from "../api/client";
 import { Button, Empty, Field, PanelHeader, Status, Tag, clock, cn, inputCls, num } from "../components/ui";
@@ -15,12 +15,12 @@ const SOURCE_TABS: { id: SourceKind; label: string }[] = [
   { id: "cod", label: "COD" }, { id: "upload", label: "CIF" },
 ];
 
-export function DftView({ jobId, setJobId }: { jobId: string | null; setJobId: (id: string) => void }) {
+export function DftView({ jobId, setJobId }: { jobId: string | null; setJobId: (id: string | null) => void }) {
   return (
     <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
       <div className="min-h-0 border-r border-line"><DftForm onCreated={setJobId} selected={jobId} onSelect={setJobId} /></div>
       <div className="flex min-h-0 flex-col">
-        {jobId ? <JobWorkspace id={jobId} /> : <DftWelcome onOpen={setJobId} />}
+        {jobId ? <JobWorkspace id={jobId} onClose={() => setJobId(null)} /> : <DftWelcome onOpen={setJobId} />}
       </div>
     </div>
   );
@@ -318,7 +318,7 @@ function JobList({ selected, onSelect }: { selected: string | null; onSelect: (i
   );
 }
 
-function JobWorkspace({ id }: { id: string }) {
+function JobWorkspace({ id, onClose }: { id: string; onClose: () => void }) {
   const q = useQuery({ queryKey: ["dft-job", id], queryFn: () => dft.job(id),
     refetchInterval: (query) => livePollInterval(query.state.data) ||
       (studiesLive(query.state.data) ? 3000 : false) });
@@ -336,6 +336,8 @@ function JobWorkspace({ id }: { id: string }) {
           {job.checks.passed ? <Tag tone="ok"><CheckCircle2 size={11} /> {done} sanity checks passed</Tag>
             : <Tag tone="bad"><XCircle size={11} /> {failed} of {job.checks.results.length} checks failed</Tag>}
           <a href={dft.archiveUrl(id)} className="ml-auto"><Button size="sm" variant="secondary"><Download size={13} /> Download set (.zip)</Button></a>
+          <button onClick={onClose} title="Close and go back to the start page" aria-label="Close"
+            className="rounded p-1 text-muted hover:bg-subtle hover:text-ink"><X size={15} /></button>
         </div>
         <div className="grid grid-cols-4 border-t border-line">
           <Cellv label="Space group" value={p.cell.spacegroup} />

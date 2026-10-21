@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { sessionId } from "./api/client";
 import { Header } from "./components/Header";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -12,6 +12,8 @@ export default function App() {
   const [session] = useState(sessionId);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [runId, setRunId] = useState<string | null>(params.get("run"));
+
+  useEffect(() => { if (view === "storage") window.history.replaceState(null, "", "?view=storage"); }, [view]);
 
   const toggle = (id: string) => setSelected((s) => {
     const n = new Set(s);

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Database, FileClock, FileText, LayoutDashboard, LineChart, Table2, Workflow } from "lucide-react";
+import { Database, FileClock, FileText, LayoutDashboard, LineChart, Table2, Workflow, X } from "lucide-react";
 import { Welcome, WelcomeSection } from "../components/Welcome";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type RunDetail } from "../api/client";
 import { Dot, Sections } from "../components/Sections";
 import { Button, Empty, Status, Tag, type Tone, clock, cn, duration, fixed, num } from "../components/ui";
@@ -20,13 +20,24 @@ export function LabView({ session, runId, setRunId, selected, toggle }: {
   const m0 = params.get("mode");
   const [mode, setMode] = useState<"xrd" | "dft" | "bridge">(m0 === "dft" || m0 === "bridge" ? m0 : "xrd");
   const [jobId, setJobId] = useState<string | null>(params.get("job"));
+  // keep the address bar equal to what is on screen, so an old link never reopens something you did not choose
+  useEffect(() => {
+    const q = new URLSearchParams({ view: "lab", mode });
+    if (mode === "xrd" && runId) q.set("run", runId);
+    if (mode === "dft" && jobId) q.set("job", jobId);
+    window.history.replaceState(null, "", `?${q.toString()}`);
+  }, [mode, runId, jobId]);
+  const pickMode = (m: "xrd" | "dft" | "bridge") => {
+    if (m === mode) { if (m === "xrd") setRunId(null); if (m === "dft") setJobId(null); }  // same tab again = back to its start page
+    setMode(m);
+  };
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
         <span className="text-[11px] font-medium uppercase tracking-wider text-faint">Workflow</span>
         <div className="flex rounded-md border border-line-strong p-0.5">
           {([["xrd", "Experiment · XRD"], ["dft", "Theory · DFT"], ["bridge", "Theory ↔ Experiment"]] as const).map(([m, label]) => (
-            <button key={m} onClick={() => setMode(m)} className={cn("rounded px-3 py-1 text-xs",
+            <button key={m} onClick={() => pickMode(m)} className={cn("rounded px-3 py-1 text-xs",
               mode === m ? "bg-ink font-medium text-white" : "text-muted hover:text-ink")}>{label}</button>
           ))}
         </div>
@@ -59,7 +70,7 @@ function XrdLab({ session, runId, setRunId, selected, toggle }: {
         {!runId ? <XrdWelcome onOpen={setRunId} />
           : run.isError ? <Empty title="Could not load the run">{String(run.error)}</Empty>
           : !run.data ? <Empty title="Loading…" />
-          : <Workspace run={run.data} />}
+          : <Workspace run={run.data} onClose={() => setRunId(null)} />}
       </div>
     </div>
   );
@@ -76,7 +87,7 @@ const CLASS: Record<string, { label: string; tone: Tone }> = {
   unexplained: { label: "Unexplained — needs review", tone: "bad" },
 };
 
-function Summary({ run }: { run: RunDetail }) {
+function Summary({ run, onClose }: { run: RunDetail; onClose: () => void }) {
   const a = metric(run, "a_refined"), cert = metric(run, "a_certified"), diff = metric(run, "difference_from_certified");
   const sigma = metric(run, "difference_in_sigma"), within = metric(run, "within_target"), target = metric(run, "success_target");
   const withinTrue = String(within?.value) === "true";
@@ -90,6 +101,8 @@ function Summary({ run }: { run: RunDetail }) {
         {run.parent_run_id && <span className="text-xs text-muted">follow-up of <span className="font-mono">{run.parent_run_id}</span></span>}
         <span className="ml-auto truncate text-xs text-muted" title={run.dataset_ids.join(", ")}>
           inputs: <span className="font-mono">{run.dataset_ids.join(", ")}</span></span>
+        <button onClick={onClose} title="Close and go back to the start page" aria-label="Close"
+          className="rounded p-1 text-muted hover:bg-subtle hover:text-ink"><X size={15} /></button>
       </div>
       <p className="truncate px-5 pb-3 text-[13px] text-ink-2" title={run.prompt}>{run.prompt}</p>
       <div className="grid grid-cols-4 border-t border-line">
@@ -122,7 +135,7 @@ function Stat({ label, value, unit, sub }: { label: string; value: string; unit:
   );
 }
 
-function Workspace({ run }: { run: RunDetail }) {
+function Workspace({ run, onClose }: { run: RunDetail; onClose: () => void }) {
   const [log, setLog] = useState(false);
   const all = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
   const measuredId = run.dataset_ids.find((id) => all.data?.find((d) => d.id === id)?.role === "measured_pattern");
@@ -131,7 +144,7 @@ function Workspace({ run }: { run: RunDetail }) {
   const live = ["queued", "planning", "running", "analysing"].includes(run.status);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Summary run={run} />
+      <Summary run={run} onClose={onClose} />
       <Sections key={run.id} sections={[
         { key: "overview", label: "Overview", icon: LayoutDashboard, badge: live ? <Dot tone="run" /> : undefined,
           body: <XrdOverview run={run} measuredId={measuredId} peaksPath={peaksPath} /> },
