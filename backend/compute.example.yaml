@@ -1,0 +1,41 @@
+# Where CoRefine may run calculations. Copy to compute.yaml (not committed) and edit for your machines.
+# Every person and site writes their own; nothing here is built into the code.
+#
+# Placeholders in strings: {QUESTAAL_BIN}, {EXCITING_ROOT} (from .env).
+# In slurm script templates: {job_name}, {command} (executable + its arguments), {executable}, {stdout}.
+
+targets:
+  local:
+    kind: local
+    threads: 1                 # OMP_NUM_THREADS per run
+    timeout_s: 3600
+    codes:
+      questaal:
+        executable: "{QUESTAAL_BIN}/lmf"
+        max_restarts: 3        # lmf continues from its saved density if SCF stopped unconverged
+      # exciting:
+      #   executable: /path/to/exciting/bin/exciting_smp
+      # espresso:
+      #   executable: pw.x
+      #   launcher: "mpirun -np 2"
+
+  # my-cluster:
+  #   kind: slurm
+  #   host: my-cluster          # an ssh host or alias from ~/.ssh/config; key-based login (BatchMode)
+  #   remote_dir: ~/corefine-runs
+  #   poll_seconds: 60
+  #   fetch_exclude: ["STATE.OUT", "EVECFV.OUT", "*.wfc*", "tmp/"]   # large files not copied back
+  #   codes:
+  #     exciting:
+  #       executable: /path/on/cluster/exciting_mpismp
+  #       script: |
+  #         #!/bin/bash
+  #         #SBATCH --job-name={job_name}
+  #         #SBATCH --nodes=1
+  #         #SBATCH --ntasks-per-node=8
+  #         #SBATCH --cpus-per-task=4
+  #         #SBATCH --time=01:00:00
+  #         module load ...            # whatever your site needs
+  #         export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+  #         ulimit -s unlimited
+  #         srun {command} > {stdout} 2>&1

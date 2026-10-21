@@ -15,7 +15,7 @@ from ase import Atoms
 from ase.units import Bohr
 
 from app.config import Settings
-from app.dft.codes.base import CodeAdapter, ReadBack
+from app.dft.codes.base import CodeAdapter, ReadBack, Results
 from app.dft.request import CalcRequest
 from app.dft.structure import Cell, spacegroup_operations
 
@@ -23,6 +23,7 @@ from app.dft.structure import Cell, spacegroup_operations
 XC_SWITCH = {"PBE": "--pbe", "PBEsol": "--pbesol"}
 LIBXC_IDS = {"PBE": (101, 130), "PBEsol": (116, 133)}
 TIMEOUT_S = 180
+EV_PER_RY = 13.605693122994
 
 
 class QuestaalSetupError(RuntimeError):
@@ -91,6 +92,8 @@ def ext_of(outdir: Path) -> str:
 
 class QuestaalAdapter(CodeAdapter):
     name, label, method, main_file = "questaal", "Questaal", "all-electron FP-LMTO (lmf)", "ctrl"
+    program = "lmf"
+    restartable = True  # lmf continues from rst.<ext> when rerun in the same folder
 
     def availability(self, s: Settings) -> tuple[bool, str]:
         if not s.QUESTAAL_BIN:
@@ -158,3 +161,32 @@ class QuestaalAdapter(CodeAdapter):
         return ReadBack(atoms=atoms, kmesh=[int(x) for x in nk.group(1).split()] if nk else None,
                         functional_ok=bool(want and xcfun and tuple(xcfun[1:3]) == want),
                         functional_detail=f"xcfun={xcfun}, expected libxc ids {want}", extra_checks=extra)
+
+    def run_args(self, outdir: Path) -> dict:
+        return {"program": self.program, "args": [ext_of(outdir)], "stdout": "lmf.out"}
+
+    def local_env(self, s: Settings) -> dict[str, str]:
+        return {"LD_LIBRARY_PATH": lib_path(s.QUESTAAL_LIB_ROOT)} if s.QUESTAAL_LIB_ROOT else {}
+
+    def parse_results(self, rundir: Path) -> Results | None:
+        """save.<ext>: one line per iteration; the last line starts with c (converged) or x (stopped unconverged).
+        Gap and Fermi level from the last BZINTS block of lmf's output (Ry)."""
+        try:
+            ext = ext_of(rundir)
+        except QuestaalSetupError:
+            return None
+        save = rundir / f"save.{ext}"
+        if not save.is_file():
+            return None
+        lines = [ln for ln in save.read_text().splitlines() if ln.strip()]
+        last = lines[-1] if lines else ""
+        ehf = re.search(r"ehf=\s*([-\d.]+)", last)
+        out = (rundir / "lmf.out").read_text(errors="replace") if (rundir / "lmf.out").is_file() else ""
+        gap = re.findall(r"gap\s*=\s*[-\d.]+\s*Ry\s*=\s*([-\d.]+)\s*eV", out)
+        ef = re.findall(r"BZINTS: Fermi energy:\s*([-\d.]+)", out)
+        converged = last.startswith("c")
+        return Results(converged=converged, total_energy_eV=float(ehf.group(1)) * EV_PER_RY if ehf else None,
+                       fermi_eV=float(ef[-1]) * EV_PER_RY if ef else None, gap_eV=float(gap[-1]) if gap else None,
+                       scf_iterations=sum(1 for ln in lines if ln[:1] in "ixc"),
+                       warnings=[] if converged else ["last save line is not marked c (converged)"],
+                       raw={"ehf_Ry": float(ehf.group(1)) if ehf else None, "save_last": last})

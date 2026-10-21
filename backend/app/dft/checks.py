@@ -25,8 +25,9 @@ def metrics(atoms: Atoms) -> dict:
             "nearest_neighbour_A": float(np.min(d[d > 1e-6])) if len(atoms) > 1 else None}
 
 
-def _check(name: str, ok: bool, detail: str, code: str | None = None) -> dict:
-    return {"check": name, "ok": bool(ok), "detail": detail, "code": code}
+def _check(name: str, ok: bool | None, detail: str, code: str | None = None) -> dict:
+    """ok None = not done (e.g. licensed files absent); it is shown but does not fail the set."""
+    return {"check": name, "ok": None if ok is None else bool(ok), "detail": detail, "code": code}
 
 
 def _structure_checks(label: str, got: dict, ref: dict) -> list[dict]:
@@ -68,4 +69,4 @@ def run_checks(cell: Cell, req: CalcRequest, declared_spacegroup: str | None, re
                     and abs(ma["volume_per_atom_A3"] / mb["volume_per_atom_A3"] - 1) < REL_TOL)
             results.append(_check(f"{a} vs {b}: same crystal", same,
                                   f"V/atom {ma['volume_per_atom_A3']:.6f} vs {mb['volume_per_atom_A3']:.6f} Å³", "cross-code"))
-    return {"passed": all(r["ok"] for r in results), "reference": ref, "codes": codes, "results": results}
+    return {"passed": all(r["ok"] is not False for r in results), "reference": ref, "codes": codes, "results": results}

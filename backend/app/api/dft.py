@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.agents.llm import LLMError
 from app.config import get_settings
-from app.dft import sources, structure
+from app.dft import execute, sources, structure
 from app.dft.codes import REGISTRY
 from app.dft.codes.exciting import ExcitingSetupError
 from app.dft.codes.questaal import QuestaalSetupError
@@ -96,7 +96,7 @@ def get_job(job_id: str):
     d = job_dir(job_id)
     files = sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file())
     return {"id": job_id, "provenance": json.loads((d / "provenance.json").read_text()),
-            "checks": json.loads((d / "checks.json").read_text()), "files": files}
+            "checks": json.loads((d / "checks.json").read_text()), "files": files, "runs": execute.all_states(d)}
 
 
 @router.get("/jobs/{job_id}/files/{path:path}")
@@ -139,3 +139,47 @@ async def upload_cif(file: UploadFile):
         path.unlink(missing_ok=True)
         raise HTTPException(400, detail=str(e)) from e
     return {"structure": str(path), "name": name, "cell": cell.summary()}
+
+
+# --- running ---------------------------------------------------------------------
+
+class RunBody(BaseModel):
+    code: str
+    target: str
+
+
+@router.get("/targets")
+def targets():
+    """Compute targets from compute.yaml (per user/site). Hosts are shown; nothing secret is stored there."""
+    try:
+        return execute.describe_targets()
+    except execute.ComputeConfigError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@router.post("/jobs/{job_id}/runs")
+def start_run(job_id: str, body: RunBody):
+    d = job_dir(job_id)
+    try:
+        return execute.start(d, body.code, body.target)
+    except execute.ComputeConfigError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@router.post("/jobs/{job_id}/runs/{code}/import")
+async def import_results(job_id: str, code: str, files: list[UploadFile]):
+    """Attach output files of a run done elsewhere (e.g. submitted by hand); they are parsed like any run."""
+    d = job_dir(job_id)
+    adapter = REGISTRY.get(code)
+    if adapter is None or not (d / code).is_dir():
+        raise HTTPException(404, detail=f"this set has no {code} inputs")
+    for f in files:
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", (f.filename or "file").rsplit("/", 1)[-1])
+        (d / code / name).write_bytes(await f.read())
+    res = adapter.parse_results(d / code)
+    if res is None:
+        raise HTTPException(400, detail=f"no {adapter.label} output recognised among the uploaded files")
+    from dataclasses import asdict
+
+    return execute.write_state(d, code, target="imported", kind="import", status="completed",
+                               finished=execute.now(), message=f"imported {len(files)} file(s)", results=asdict(res))

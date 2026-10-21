@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Download, ExternalLink, Upload, XCircle } from "lucide-react";
+import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, dft, type DftJob } from "../api/client";
 import { Quadrants } from "../components/Quadrants";
 import { Button, Empty, Field, PanelHeader, Tag, clock, cn, inputCls, num } from "../components/ui";
+import { RunsPane, livePollInterval } from "./DftRuns";
 
 type SourceKind = "storage" | "mp" | "cod" | "upload";
 const SOURCE_TABS: { id: SourceKind; label: string }[] = [
@@ -168,18 +169,20 @@ function JobList({ selected, onSelect }: { selected: string | null; onSelect: (i
 }
 
 function JobWorkspace({ id }: { id: string }) {
-  const q = useQuery({ queryKey: ["dft-job", id], queryFn: () => dft.job(id) });
+  const q = useQuery({ queryKey: ["dft-job", id], queryFn: () => dft.job(id),
+    refetchInterval: (query) => livePollInterval(query.state.data) });
   if (q.isError) return <Empty title="Could not load this input set">{String(q.error)}</Empty>;
   if (!q.data) return <Empty title="Loading…" />;
   const job = q.data;
   const p = job.provenance;
-  const failed = job.checks.results.filter((r) => !r.ok).length;
+  const failed = job.checks.results.filter((r) => r.ok === false).length;
+  const done = job.checks.results.filter((r) => r.ok !== null).length;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-line bg-surface">
         <div className="flex items-center gap-3 px-5 pb-2 pt-3">
           <h1 className="text-[15px] font-semibold">{p.cell.formula} <span className="font-normal text-muted">· {p.request.functional} ground state · k {p.request.kmesh.join("×")}</span></h1>
-          {job.checks.passed ? <Tag tone="ok"><CheckCircle2 size={11} /> {job.checks.results.length} sanity checks passed</Tag>
+          {job.checks.passed ? <Tag tone="ok"><CheckCircle2 size={11} /> {done} sanity checks passed</Tag>
             : <Tag tone="bad"><XCircle size={11} /> {failed} of {job.checks.results.length} checks failed</Tag>}
           <a href={dft.archiveUrl(id)} className="ml-auto"><Button size="sm" variant="secondary"><Download size={13} /> Download set (.zip)</Button></a>
         </div>
@@ -193,8 +196,8 @@ function JobWorkspace({ id }: { id: string }) {
       <Quadrants panes={[
         { key: "structure", title: "Structure", body: <StructurePane job={job} /> },
         { key: "checks", title: "Sanity checks", body: <ChecksPane job={job} /> },
-        ...Object.entries(p.generated).map(([code, g]) => ({
-          key: code, title: `${g.label} · ${g.method}`, body: <CodePane job={job} code={code} /> })),
+        { key: "inputs", title: "Inputs", body: <InputsPane job={job} /> },
+        { key: "runs", title: "Runs & results", body: <RunsPane job={job} /> },
       ]} />
     </div>
   );
@@ -231,7 +234,7 @@ function StructurePane({ job }: { job: DftJob }) {
         <div className="mb-1 font-medium text-ink-2">Each input read back as its code reads it</div>
         <table className="tabular w-full">
           <thead className="text-left text-[11px] text-muted"><tr><th className="py-1 font-medium" />
-            <th className="font-medium">Source cell</th>{Object.keys(codes).map((c) => <th key={c} className="font-medium capitalize">{c}</th>)}</tr></thead>
+            <th className="font-medium">Source cell</th>{Object.keys(codes).map((c) => <th key={c} className="font-medium">{p.generated[c]?.label ?? c}</th>)}</tr></thead>
           <tbody className="divide-y divide-line">
             {rows.map(([label, key, f]) => (
               <tr key={key}><td className="py-1.5 text-muted">{label}</td><td className="font-mono">{f(ref)}</td>
@@ -249,7 +252,9 @@ function ChecksPane({ job }: { job: DftJob }) {
     <ul className="divide-y divide-line">
       {job.checks.results.map((r) => (
         <li key={r.check} className="flex gap-2.5 px-4 py-2">
-          {r.ok ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-ok" /> : <XCircle size={14} className="mt-0.5 shrink-0 text-bad" />}
+          {r.ok ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-ok" />
+            : r.ok === null ? <CircleDashed size={14} className="mt-0.5 shrink-0 text-faint" />
+            : <XCircle size={14} className="mt-0.5 shrink-0 text-bad" />}
           <div className="min-w-0">
             <div className="text-xs font-medium">{r.check}</div>
             <div className="truncate font-mono text-[11px] text-muted" title={r.detail}>{r.detail}</div>
@@ -260,14 +265,31 @@ function ChecksPane({ job }: { job: DftJob }) {
   );
 }
 
+function InputsPane({ job }: { job: DftJob }) {
+  const codes = Object.entries(job.provenance.generated);
+  const [code, setCode] = useState(codes[0]?.[0]);
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex gap-1 border-b border-line bg-subtle/60 px-2 py-1">
+        {codes.map(([c, g]) => <button key={c} onClick={() => setCode(c)} className={cn("rounded px-2 py-0.5 text-[11.5px]",
+          c === code ? "bg-surface font-medium text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink")}>{g.label}</button>)}
+      </div>
+      <div className="min-h-0 flex-1">{code && <CodePane key={code} job={job} code={code} />}</div>
+    </div>
+  );
+}
+
 // Files a person reads; build artefacts (atm, basp0, log) stay in the download
-const HIDDEN = [/^atm\./, /^basp0\./, /^log\./];
+const HIDDEN = [/^atm\./, /^basp0\./, /^log\./, /^mixm\./, /^rst\./, /^moms\.h5$/, /^wkp\./,
+  /^(STATE|EVEC\w*|EVAL\w*|SYM\w*|EIGVAL|OCCSV|LINENGY|EQATOMS|KPOINTS|LATTICE|BONDLENGTH|RMSDVEFF|EFERMI|TOTENERGY)\.OUT$/i,
+  /^(info|eigval|evalcore|atoms|geometry|\w+_scf)\.xml$/];
+const order = (f: string, main: string) => (f.startsWith(main) ? 0 : f.startsWith("init.") ? 1 : /\.(in|log|out)$/.test(f) ? 3 : 2);
 
 function CodePane({ job, code }: { job: DftJob; code: string }) {
   const g = job.provenance.generated[code];
   const files = job.files.filter((f) => f.startsWith(`${code}/`)).map((f) => f.slice(code.length + 1))
     .filter((f) => !HIDDEN.some((re) => re.test(f)))
-    .sort((a, b) => Number(!a.startsWith(g.main_file)) - Number(!b.startsWith(g.main_file)) || a.localeCompare(b));
+    .sort((a, b) => order(a, g.main_file) - order(b, g.main_file) || a.localeCompare(b));
   const [tab, setTab] = useState(0);
   const path = files[Math.min(tab, files.length - 1)];
   const q = useQuery({ queryKey: ["dft-file", job.id, code, path], queryFn: () => dft.file(job.id, `${code}/${path}`), enabled: !!path });

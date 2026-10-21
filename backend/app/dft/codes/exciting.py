@@ -19,10 +19,11 @@ from ase.units import Bohr
 from excitingtools.input import ExcitingGroundStateInput, ExcitingInputXML, ExcitingStructure
 
 from app.config import Settings
-from app.dft.codes.base import CodeAdapter, ReadBack
+from app.dft.codes.base import CodeAdapter, ReadBack, Results
 from app.dft.request import CalcRequest
 from app.dft.structure import Cell
 
+EV_PER_HA = 27.211386245988
 # xctype values checked against xml/schema/groundstate.xsd
 XC = {"PBE": "GGA_PBE", "PBEsol": "GGA_PBE_SOL", "LDA": "LDA_PW"}
 # Ground-state attributes whose schema defaults are recorded for a "normal inputs" run
@@ -57,6 +58,7 @@ def validate(outdir: Path, exciting_root: Path) -> dict:
 
 class ExcitingAdapter(CodeAdapter):
     name, label, method, main_file = "exciting", "exciting", "all-electron FP-(L)APW+lo", "input.xml"
+    program = "exciting_smp"  # or exciting_mpismp; the compute target decides which binary and launcher
 
     def availability(self, s: Settings) -> tuple[bool, str]:
         root = s.EXCITING_ROOT
@@ -115,3 +117,28 @@ class ExcitingAdapter(CodeAdapter):
         return ReadBack(atoms=atoms, kmesh=[int(x) for x in ngridk.split()] if ngridk else None,
                         functional_ok=gs.get("xctype") == XC[req.functional], functional_detail=f"xctype={gs.get('xctype')}",
                         extra_checks=extra)
+
+    def run_args(self, outdir: Path) -> dict:
+        return {"program": self.program, "args": [], "stdout": "exciting.log"}
+
+    def parse_results(self, rundir: Path) -> Results | None:
+        """From INFO.OUT (Hartree units): last total energy, Fermi energy, estimated gap, SCF count, convergence."""
+        info = rundir / "INFO.OUT"
+        if not info.is_file():
+            return None
+        text = info.read_text(errors="replace")
+
+        def last(label: str) -> float | None:
+            v = re.findall(rf"{label}\s*:\s*([-\d.Ee+]+)", text)
+            return float(v[-1]) if v else None
+
+        e, ef, gap = last("Total energy"), last("Fermi energy"), last("Estimated fundamental gap")
+        iters = re.findall(r"SCF iteration number\s*:\s*(\d+)", text)
+        converged = "Convergence targets achieved" in text
+        stopped = re.search(r"EXCITING \w+ stopped", text) is not None
+        warnings = [w for w, bad in (("SCF did not report convergence", not converged),
+                                     ("INFO.OUT has no normal-stop line", not stopped)) if bad]
+        return Results(converged=converged, total_energy_eV=e * EV_PER_HA if e is not None else None,
+                       fermi_eV=ef * EV_PER_HA if ef is not None else None, gap_eV=gap * EV_PER_HA if gap is not None else None,
+                       scf_iterations=int(iters[-1]) if iters else None, warnings=warnings,
+                       raw={"total_energy_Ha": e, "fermi_Ha": ef, "gap_Ha": gap})

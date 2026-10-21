@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     EXCITING_ROOT: Path | None = None        # exciting source tree: species/ and xml/schema/
     QUESTAAL_BIN: Path | None = None         # folder with blm, lmfa, lmchk, lmf
     QUESTAAL_LIB_ROOT: Path | None = None    # Spack opt/ tree whose lib dirs Questaal binaries need
+    QE_PSEUDO_DIR: Path | None = None        # Quantum ESPRESSO .UPF files (any library, e.g. SSSP)
+    VASP_PP_PATH: Path | None = None         # licensed VASP POTCARs: <path>/potpaw_PBE/<El>/POTCAR
+    COMPUTE_CONFIG: Path = BACKEND_DIR / "compute.yaml"   # where calculations may run (local, Slurm clusters)
     MP_API_KEY: str = ""                     # optional; Materials Project works without it via OPTIMADE
 
     LOCAL_DATA_DIR: Path = BACKEND_DIR / ".local"

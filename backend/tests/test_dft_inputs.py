@@ -37,8 +37,8 @@ def test_request_refusals(monkeypatch):
     assert not REGISTRY["exciting"].problems(CalcRequest(structure="x.cif", functional="LDA"))
     with pytest.raises(RequestError, match="no structure source"):
         prepare(CalcRequest(), get_settings().LOCAL_DATA_DIR / "nope")
-    with pytest.raises(RequestError, match="unknown code 'vasp'"):
-        prepare(CalcRequest(structure=str(SI_CIF), codes=["vasp"]), get_settings().LOCAL_DATA_DIR / "nope")
+    with pytest.raises(RequestError, match="unknown code 'nosuchcode'"):
+        prepare(CalcRequest(structure=str(SI_CIF), codes=["nosuchcode"]), get_settings().LOCAL_DATA_DIR / "nope")
     monkeypatch.setattr(get_settings(), "QUESTAAL_BIN", None)
     with pytest.raises(RequestError, match="Questaal is not available here: QUESTAAL_BIN not set"):
         prepare(CalcRequest(structure=str(SI_CIF), codes=["questaal"]), get_settings().LOCAL_DATA_DIR / "nope")
@@ -131,8 +131,10 @@ def test_dft_api_job_from_storage_dataset(seeded, no_index):
 
     with TestClient(app) as c:
         cfg = c.get("/dft/config").json()
-        assert {d["name"]: d["available"] for d in cfg["codes"]} == {"exciting": True, "questaal": True}
-        r = c.post("/dft/jobs", json={"structure": "dataset:cod-9008565-si", "functional": "PBE", "kmesh": [2, 2, 2]})
+        avail = {d["name"]: d["available"] for d in cfg["codes"]}
+        assert avail["exciting"] and avail["questaal"] and set(avail) >= {"exciting", "questaal", "espresso", "vasp"}
+        r = c.post("/dft/jobs", json={"structure": "dataset:cod-9008565-si", "functional": "PBE", "kmesh": [2, 2, 2],
+                                      "codes": ["exciting", "questaal"]})
         assert r.status_code == 200, r.text
         job = r.json()
         assert job["passed"]

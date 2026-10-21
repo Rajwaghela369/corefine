@@ -11,7 +11,7 @@ Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified dev
   reference and its outputs are in `examples/gold_outputs/`.
 - `backend/tests/` — pytest; LLM calls mocked, everything else real (local mode).
 - `frontend/src/` — React + Vite + TS: `views/` (Storage, Lab with 2×2 Plan/Plots/Data/Report panes), `panels/`, `components/` (header, sidebar, UI primitives), `api/`.
-- `backend/app/dft/` — structure (CIF/COD/Materials Project/storage) → standard cell → inputs for every registered code adapter (`codes/`) → read-back checks. New code = new `CodeAdapter` + one registry line. API `/dft/*`, CLI `scripts/dft_inputs.py`.
+- `backend/app/dft/` — structure (CIF/COD/Materials Project/storage) → standard cell → inputs for every registered code adapter (`codes/`) → read-back checks. New code = new `CodeAdapter` + one registry line. `execute.py` runs sets on targets from the per-user `compute.yaml` (local or Slurm over SSH) and parses results via the adapter. API `/dft/*`, CLI `scripts/dft_inputs.py`.
 - `data/` — seed dataset manifests and READMEs (raw files come from `backend/scripts/fetch_data.py`).
 
 ## Conventions

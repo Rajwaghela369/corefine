@@ -102,7 +102,7 @@ export function sessionId(): string {
 
 // --- All-electron DFT inputs ------------------------------------------------
 
-export interface DftCheck { check: string; ok: boolean; detail: string }
+export interface DftCheck { check: string; ok: boolean | null; detail: string; code?: string | null }
 export interface DftJobListItem { id: string; created: string; structure: string; formula: string; functional: string;
   kmesh: number[]; codes: string[]; passed: boolean; n_checks: number; n_failed: number }
 export interface DftCell { formula: string; natoms: number; spacegroup: string; volume_A3: number;
@@ -115,8 +115,14 @@ export interface DftJob {
     generated: Record<string, { label: string; method: string; main_file: string; files: string[];
       set_explicitly: Record<string, string>; defaults: { source: string; values: Record<string, unknown> } }> };
   checks: { passed: boolean; results: DftCheck[]; reference: Record<string, any>; codes: Record<string, any> };
+  runs: Record<string, DftRun>;
 }
 export interface DftCode { name: string; label: string; method: string; available: boolean; reason: string; functionals: string[] }
+export interface DftResults { converged: boolean | null; total_energy_eV: number | null; fermi_eV: number | null;
+  gap_eV: number | null; scf_iterations: number | null; warnings: string[]; raw: Record<string, unknown> }
+export interface DftRun { code: string; target: string; kind: string; status: string; started?: string; finished?: string | null;
+  message: string; attempts?: number; remote_job_id?: string | null; remote_dir?: string; results: DftResults | null; updated: string }
+export interface DftTarget { name: string; kind: "local" | "slurm"; host: string | null; codes: string[]; confirm: boolean }
 export interface DftJobBody { prompt?: string; structure?: string; codes?: string[]; functional?: string; kmesh?: number[] }
 
 export const dft = {
@@ -128,6 +134,14 @@ export const dft = {
   file: (id: string, path: string) => fetch(`${API}/dft/jobs/${id}/files/${path}`).then((r) => r.text()),
   fileUrl: (id: string, path: string) => `${API}/dft/jobs/${id}/files/${path}`,
   archiveUrl: (id: string) => `${API}/dft/jobs/${id}/archive`,
+  targets: () => fetch(`${API}/dft/targets`).then(json<DftTarget[]>),
+  startRun: (id: string, code: string, target: string) => fetch(`${API}/dft/jobs/${id}/runs`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, target }) }).then(json<DftRun>),
+  importResults: (id: string, code: string, files: File[]) => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    return fetch(`${API}/dft/jobs/${id}/runs/${code}/import`, { method: "POST", body: fd }).then(json<DftRun>);
+  },
   upload: (f: File) => {
     const fd = new FormData();
     fd.append("file", f);

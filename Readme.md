@@ -111,9 +111,12 @@ settings. It is built to be shared: no machine-specific paths in the code, and e
 
 **Codes are adapters.** `app/dft/codes/` holds one module per code implementing `CodeAdapter`
 (`codes/base.py`): whether the code is usable on this server, which functionals it maps, how to write
-its input, and how to read that input back the way the code itself will. Register it in
-`codes/__init__.py`, and the request API, the checks and the UI pick it up automatically. Shipped:
-exciting (FP-(L)APW+lo) and Questaal (FP-LMTO). Settings a request does not specify are left at
+its input, how to read that input back the way the code itself will, how to launch it and how to
+parse its results. Register it in `codes/__init__.py`, and the request API, the checks, the runner
+and the UI pick it up automatically. Shipped: exciting (FP-(L)APW+lo), Questaal (FP-LMTO),
+Quantum ESPRESSO (pw.x; pseudopotentials from your `QE_PSEUDO_DIR`, cutoffs from an SSSP JSON or the
+pseudopotential headers, never guessed) and VASP (POSCAR/KPOINTS/INCAR; the licensed POTCAR is
+assembled only from your own `VASP_PP_PATH`). All codes use the same Γ-centred k-mesh. Settings a request does not specify are left at
 the code's own documented defaults, and the adapter reports them.
 
 ```bash
@@ -130,6 +133,21 @@ codes: formula, space group, volume per atom, nearest-neighbour distance, k-mesh
 each code's own checks (exciting: schema validation; Questaal: `lmchk` symmetry and sphere overlap).
 Output: one folder per code, plus `checks.json`, `provenance.json` and `SUMMARY.md`, downloadable as a zip.
 
+### Running the calculations
+
+Where things run is per-user configuration: copy `backend/compute.example.yaml` to `compute.yaml`
+(not committed). Each *target* lists the codes it can run:
+
+- `kind: local`: runs the program in the set's folder with a thread limit and timeout. Codes whose
+  SCF can continue from saved density (Questaal) are restarted automatically if they stop unconverged.
+- `kind: slurm`: copies the folder to your cluster over SSH (your own `~/.ssh/config` and keys, no
+  passwords stored), fills in *your* job-script template, submits with `sbatch`, polls `sacct`, copies
+  results back. The UI asks for confirmation before any cluster submission.
+
+Results come only from each code's own output files: convergence, SCF iterations, gap, Fermi level,
+total energy. Runs done elsewhere can be imported (upload the output files) and are parsed the same
+way. Run state lives in `<set>/runs/<code>.json`.
+
 Configure the codes you have in `backend/.env`: `EXCITING_ROOT` (exciting tree: species + schema),
-`QUESTAAL_BIN` (blm, lmfa, lmchk) and, for Spack builds, `QUESTAAL_LIB_ROOT`. Codes left unset are
-shown as unavailable, with the reason.
+`QUESTAAL_BIN` (blm, lmfa, lmchk) and, for Spack builds, `QUESTAAL_LIB_ROOT`; `QE_PSEUDO_DIR`;
+`VASP_PP_PATH`. Codes left unset are shown as unavailable, with the reason.
