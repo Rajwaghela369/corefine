@@ -78,6 +78,10 @@ class CodeAdapter(ABC):
         {"error": what the code said, "change": what was changed, "why": reason}; else None. Applied at most once."""
         return None
 
+    def parse_forces(self, rundir: Path):
+        """Atomic forces in eV/Å, shape (natoms, 3), in input order; None if the code/run does not provide them."""
+        return None
+
     def local_env(self, s: Settings) -> dict[str, str]:
         """Extra environment the program needs when run on this server (e.g. library paths)."""
         return {}

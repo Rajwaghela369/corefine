@@ -76,3 +76,10 @@ def scaled(cell: Cell, volume_scale: float) -> Cell:
     """Same crystal with every length multiplied by volume_scale^(1/3) (isotropic strain)."""
     return Cell(lattice=cell.lattice * volume_scale ** (1 / 3), frac=cell.frac.copy(), symbols=list(cell.symbols),
                 spacegroup_number=cell.spacegroup_number, spacegroup_symbol=cell.spacegroup_symbol)
+
+
+def as_given(atoms: Atoms, symprec: float = SYMPREC) -> Cell:
+    """The cell exactly as given (no standardisation), e.g. a displaced cell for phonons."""
+    number, symbol = spacegroup_of(atoms, symprec)
+    return Cell(lattice=np.asarray(atoms.cell[:], float), frac=atoms.get_scaled_positions(wrap=False),
+                symbols=atoms.get_chemical_symbols(), spacegroup_number=number, spacegroup_symbol=symbol)

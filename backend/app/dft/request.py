@@ -28,6 +28,9 @@ class CalcRequest(BaseModel):
     volume_scale: float = Field(default=1.0, gt=0.5, lt=1.5, description="Cell volume relative to the source structure")
     basis_scale: float = Field(default=1.0, ge=0.5, le=4.0,
                                description="Basis size relative to the code's default/recommended cutoff energy")
+    keep_cell: bool = Field(default=False, description="Use the structure exactly as given (no symmetry standardisation); "
+                                                       "needed for displaced cells, e.g. phonons")
+    forces: bool = Field(default=False, description="Ask the code to compute and print atomic forces")
     sphere_ref_scale: float | None = Field(default=None, description="All-electron codes: choose muffin-tin radii as at this "
                                                                      "volume scale (smallest volume of an EOS), so they stay fixed")
     notes: str = Field(default="", description="Anything in the request that could not be expressed in the fields above")

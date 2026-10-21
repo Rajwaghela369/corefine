@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.agents.llm import LLMError
 from app.config import get_settings
-from app.dft import execute, materials, sources, structure, studies, tools, workflow
+from app.dft import execute, materials, raman, sources, structure, studies, tools, workflow
 from app.dft.codes import REGISTRY
 from app.dft.codes.exciting import ExcitingSetupError
 from app.dft.codes.questaal import QuestaalSetupError
@@ -99,7 +99,7 @@ def get_job(job_id: str):
     summary = json.loads((d / "summary.json").read_text()) if (d / "summary.json").is_file() else None
     return {"id": job_id, "provenance": json.loads((d / "provenance.json").read_text()),
             "checks": json.loads((d / "checks.json").read_text()), "files": files, "runs": execute.all_states(d),
-            "plan": plan, "summary": summary, "studies": studies.read(d)}
+            "plan": plan, "summary": summary, "studies": {**studies.read(d), "raman": raman.read(d)}}
 
 
 @router.get("/jobs/{job_id}/files/{path:path}")
@@ -261,3 +261,19 @@ def save_eos_structure(job_id: str, code: str):
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(400, detail=str(e)) from e
     return {"dataset": m.id, "manifest": m.model_dump(exclude_none=True)}
+
+
+class RamanBody(BaseModel):
+    code: str = "espresso"
+    kmesh: tuple[int, int, int] | None = None   # default: converged k-mesh of that code, else the set's
+
+
+@router.post("/jobs/{job_id}/studies/raman")
+def start_raman(job_id: str, body: RamanBody):
+    """Γ-point phonons by finite displacements -> Raman/IR-active modes (group theory) and a stick spectrum."""
+    if body.code not in raman.FORCE_CODES:
+        raise HTTPException(400, detail=f"Raman needs a code that returns forces: {', '.join(raman.FORCE_CODES)}")
+    try:
+        return raman.start(job_dir(job_id), body.code, body.kmesh)
+    except execute.ComputeConfigError as e:
+        raise HTTPException(400, detail=str(e)) from e

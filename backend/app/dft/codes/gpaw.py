@@ -27,7 +27,7 @@ atoms = read("structure.json")
 atoms.calc = GPAW(mode=PW({ecut}), xc="{xc}", kpts={{"size": ({k1}, {k2}, {k3}), "gamma": True}}, txt="gpaw.txt")
 energy = atoms.get_potential_energy()
 print(f"CoRefine: energy {{energy:.8f}} eV")
-'''
+{forces_block}'''
 
 
 class GpawAdapter(CodeAdapter):
@@ -45,7 +45,10 @@ class GpawAdapter(CodeAdapter):
         ase_write(outdir / "structure.json", cell.atoms, format="json")
         ecut = round(DEFAULT_ECUT_EV * req.basis_scale, 3)
         k1, k2, k3 = req.kmesh
-        (outdir / "gpaw_scf.py").write_text(SCRIPT.format(ecut=ecut, xc=XC[req.functional], k1=k1, k2=k2, k3=k3))
+        forces_block = ('import json\njson.dump(atoms.get_forces().tolist(), open("forces.json", "w"))\n'
+                        'print("CoRefine: forces written")\n') if req.forces else ""
+        (outdir / "gpaw_scf.py").write_text(SCRIPT.format(ecut=ecut, xc=XC[req.functional], k1=k1, k2=k2, k3=k3,
+                                                          forces_block=forces_block))
         return {"files": ["gpaw_scf.py", "structure.json"],
                 "set_explicitly": {"xc": XC[req.functional], "kpts": f"{k1}x{k2}x{k3}, Gamma-centred",
                                    **({"ecut": f"{ecut} eV (x{req.basis_scale} the default)"} if req.basis_scale != 1 else {})},
@@ -79,3 +82,11 @@ class GpawAdapter(CodeAdapter):
         return Results(converged=bool(conv), total_energy_eV=float(e[-1]) if e else None, fermi_eV=float(ef[-1]) if ef else None,
                        gap_eV=float(gap[-1]) if gap else None, scf_iterations=int(conv.group(1)) if conv else None,
                        warnings=[] if conv else ["GPAW did not report convergence"], raw={"energy_reference": "isolated atoms"})
+
+    def parse_forces(self, rundir: Path):
+        import json
+
+        import numpy as np
+
+        f = rundir / "forces.json"
+        return np.array(json.loads(f.read_text())) if f.is_file() else None

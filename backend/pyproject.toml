@@ -26,6 +26,7 @@ dependencies = [
     "ase>=3.29",
     "excitingtools>=2.0",
     "spglib>=2.8.0",
+    "phonopy>=4.8.3",
 ]
 
 [project.optional-dependencies]

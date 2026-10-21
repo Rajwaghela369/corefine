@@ -156,7 +156,7 @@ class EspressoAdapter(CodeAdapter):
             shutil.copy2(p, outdir / p.name)
         ecutwfc, ecutrho = max(wfc) * req.basis_scale, max(rho) * req.basis_scale
         input_data = {"control": {"calculation": "scf", "prefix": "pwscf", "pseudo_dir": "./", "outdir": "./tmp",
-                                  "title": title[:70]},
+                                  "title": title[:70], **({"tprnfor": True} if req.forces else {})},
                       "system": {"ecutwfc": ecutwfc, "ecutrho": ecutrho,
                                  **(METAL_SMEARING if req.occupations == "smearing" else {})}}
         with open(outdir / "pw.in", "w") as fd:
@@ -237,3 +237,9 @@ class EspressoAdapter(CodeAdapter):
         return {"error": "pw.x: charge is wrong: smearing is needed (the system is metallic)",
                 "change": "occupations='smearing', smearing='mv' (Marzari-Vanderbilt), degauss=0.01 Ry",
                 "why": "pw.x defaults to fixed occupations, which cannot describe a metal; 0.01 Ry is CoRefine's choice"}
+
+    def parse_forces(self, rundir: Path):
+        out = rundir / "pw.out"
+        if not out.is_file() or "Forces acting on atoms" not in out.read_text(errors="replace"):
+            return None
+        return ase_read(out, format="espresso-out").get_forces()

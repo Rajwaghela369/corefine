@@ -49,7 +49,7 @@ def _structure_checks(label: str, got: dict, ref: dict) -> list[dict]:
 def run_checks(cell: Cell, req: CalcRequest, declared_spacegroup: str | None, read_backs: dict[str, ReadBack]) -> dict:
     ref = metrics(cell.atoms)
     results = []
-    if declared_spacegroup:
+    if declared_spacegroup and not req.keep_cell:
         results.append(_check("source: declared space group reproduced by spglib",
                               str(ref["spacegroup_number"]) == str(declared_spacegroup),
                               f"source says {declared_spacegroup}, spglib finds {ref['spacegroup_number']}", "source"))

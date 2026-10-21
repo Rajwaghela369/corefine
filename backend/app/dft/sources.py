@@ -46,6 +46,9 @@ def load(source: str, cache_dir: Path | None = None) -> Sourced:
     if source.startswith("dataset:"):
         return _from_dataset(source[8:])
     p = Path(source).expanduser()
+    if p.suffix.lower() == ".json" and p.is_file():  # ASE JSON written by CoRefine itself (e.g. displaced phonon cells)
+        atoms = ase_read(p)
+        return Sourced(atoms=atoms, source=str(p), sha256=hashlib.sha256(p.read_bytes()).hexdigest())
     if p.suffix.lower() == ".cif" and p.is_file():
         data = p.read_bytes()
         return _from_cif_bytes(data, source=str(p), url=None)
