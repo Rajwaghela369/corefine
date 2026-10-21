@@ -29,7 +29,7 @@ export function LabView({ session, runId, setRunId, selected, toggle }: {
         </div>
         <span className="text-[11px] text-muted">{mode === "xrd"
           ? "Measured pattern → agents write and run the analysis → traced report"
-          : "Structure → inputs for every configured all-electron code → read-back checks"}</span>
+          : "Structure → inputs for every configured DFT code (all-electron and pseudopotential) → checks, runs, studies"}</span>
       </div>
       <div className="min-h-0 flex-1">
         {mode === "xrd" ? <XrdLab session={session} runId={runId} setRunId={setRunId} selected={selected} toggle={toggle} />

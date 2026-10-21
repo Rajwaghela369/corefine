@@ -20,8 +20,9 @@ export function DftView({ jobId, setJobId }: { jobId: string | null; setJobId: (
       <div className="flex min-h-0 flex-col">
         {jobId ? <JobWorkspace id={jobId} /> : (
           <Empty title="No input set selected">
-            Choose a structure and settings on the left. CoRefine writes inputs for the all-electron codes
-            (exciting, Questaal), reads each one back as the code would, and checks they describe the same crystal.
+            Choose a structure and settings on the left. CoRefine writes inputs for every configured code
+            (all-electron and pseudopotential), reads each one back as the code would, and checks they describe the
+            same crystal; installed codes then run here, with convergence and equation-of-state studies.
           </Empty>
         )}
       </div>
