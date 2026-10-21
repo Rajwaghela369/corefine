@@ -33,13 +33,22 @@ def test_compare_runs_tool(local_env):
     assert rows[0]["value"] == 5.430862
 
 
-def test_start_run_only_proposes(local_env):
+def test_start_run_only_proposes(seeded):
     from app.agents.copilot import start_run
 
     out = json.loads(start_run.invoke({"prompt": "rerun", "dataset_ids": ["nist-srm-640f"], "parent_run_id": "run-a"}))
     assert out["proposed_run"]["parent_run_id"] == "run-a"
     with get_sessionmaker()() as db:
         assert db.query(RunRow).count() == 0
+
+
+def test_start_run_needs_measured_pattern(seeded):
+    from app.agents.copilot import start_run
+
+    out = json.loads(start_run.invoke({"prompt": "run", "dataset_ids": ["cod-9008565-si"]}))
+    assert "proposed_run" not in out and "measured_pattern" in out["error"]
+    out = json.loads(start_run.invoke({"prompt": "run", "dataset_ids": ["no-such-dataset"]}))
+    assert "proposed_run" not in out
 
 
 def test_read_artifact_rejects_traversal(local_env):

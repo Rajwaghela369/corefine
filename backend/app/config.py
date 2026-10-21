@@ -22,8 +22,7 @@ CLOUD_REQUIRED = (
     "DATABASE_URL",
     "QDRANT_URL", "QDRANT_API_KEY",
     "DAYTONA_API_KEY",
-    "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
-)
+)  # Langfuse is optional: without its keys tracing is off
 
 
 class MissingSettingError(RuntimeError):

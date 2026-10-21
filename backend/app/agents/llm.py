@@ -71,7 +71,9 @@ def parse(*, agent: str, system: str, content: list[dict] | str, output: type[T]
            if lf else nullcontext())
     with gen as g:
         try:
-            resp = get_client().messages.parse(**kwargs)
+            # Streamed so large max_tokens (the Coder's 32k) passes the SDK's 10-minute non-streaming guard
+            with get_client().messages.stream(**kwargs) as stream:
+                resp = stream.get_final_message()
         except anthropic.APIStatusError as e:
             if g:
                 g.update(level="ERROR", status_message=str(e))
@@ -81,7 +83,7 @@ def parse(*, agent: str, system: str, content: list[dict] | str, output: type[T]
         if g:
             g.update(output=resp.parsed_output.model_dump() if resp.parsed_output else None,
                      usage_details={"input": resp.usage.input_tokens, "output": resp.usage.output_tokens},
-                     metadata={"stop_reason": resp.stop_reason, "request_id": resp._request_id})
+                     metadata={"stop_reason": resp.stop_reason, "request_id": getattr(resp, "_request_id", None)})
     if resp.stop_reason == "refusal":
         cat = resp.stop_details.category if resp.stop_details else None
         raise LLMError(f"{agent}: model declined the request (category: {cat})")
