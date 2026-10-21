@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = ""
     S3_BUCKET: str = ""
+    S3_ENDPOINT_URL: str = ""  # S3-compatible store (e.g. Neon); empty means AWS
 
     DATABASE_URL: str = ""
 

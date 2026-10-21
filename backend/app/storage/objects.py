@@ -27,11 +27,11 @@ class ObjectStore(Protocol):
 
 
 class S3Store:
-    def __init__(self, bucket: str, region: str):
+    def __init__(self, bucket: str, region: str, endpoint_url: str = ""):
         import boto3
 
         self.bucket = bucket
-        self.s3 = boto3.client("s3", region_name=region)
+        self.s3 = boto3.client("s3", region_name=region, endpoint_url=endpoint_url or None)
 
     def put(self, key, data, content_type=None):
         ct = content_type or mimetypes.guess_type(key)[0] or "application/octet-stream"
@@ -109,5 +109,5 @@ class LocalStore:
 def get_store() -> ObjectStore:
     s = get_settings()
     if s.S3_BUCKET and s.AWS_ACCESS_KEY_ID:
-        return S3Store(s.S3_BUCKET, s.AWS_REGION)
+        return S3Store(s.S3_BUCKET, s.AWS_REGION, s.S3_ENDPOINT_URL)
     return LocalStore(s.LOCAL_DATA_DIR / "bucket")
