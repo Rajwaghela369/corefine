@@ -22,8 +22,7 @@ CLOUD_REQUIRED = (
     "DATABASE_URL",
     "QDRANT_URL", "QDRANT_API_KEY",
     "DAYTONA_API_KEY",
-    "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
-)
+)  # Langfuse is optional: without its keys tracing is off
 
 
 class MissingSettingError(RuntimeError):
@@ -45,6 +44,7 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = ""
     S3_BUCKET: str = ""
+    S3_ENDPOINT_URL: str = ""  # S3-compatible store (e.g. Neon); empty means AWS
 
     DATABASE_URL: str = ""
 

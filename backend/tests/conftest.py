@@ -24,9 +24,13 @@ def _clear_caches():
 
 @pytest.fixture(autouse=True)
 def local_env(tmp_path, monkeypatch):
-    for key in list(os.environ):
-        if key.startswith(("AWS_", "DAYTONA_", "QDRANT_", "LANGFUSE_", "DATABASE_URL", "S3_")):
-            monkeypatch.delenv(key, raising=False)
+    from app.config import Settings
+
+    # Empty env vars outrank backend/.env, so a filled-in .env never reaches the tests
+    cloud = ("AWS_", "DAYTONA_", "QDRANT_", "LANGFUSE_", "DATABASE_URL", "S3_")
+    for key in set(os.environ) | set(Settings.model_fields):
+        if key.startswith(cloud):
+            monkeypatch.setenv(key, "")
     monkeypatch.setenv("COREFINE_MODE", "local")
     monkeypatch.setenv("LOCAL_DATA_DIR", str(tmp_path / "local"))
     monkeypatch.setenv("TOOLS_DIR", str(tmp_path / "tools"))  # never see codes installed on the dev machine

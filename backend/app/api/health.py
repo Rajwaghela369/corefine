@@ -55,7 +55,7 @@ def _langfuse():
 
     lf = get_langfuse()
     if lf is None:
-        raise RuntimeError("LANGFUSE keys not set; tracing off")
+        return "off (no keys; tracing disabled)"
     if not lf.auth_check():
         raise RuntimeError("auth check failed")
     return "langfuse cloud"

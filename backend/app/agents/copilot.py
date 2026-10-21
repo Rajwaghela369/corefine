@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.models.db import MessageRow, MetricRow, RunRow, StepRow, get_sessionmaker
 from app.orchestration.events import bus
 from app.retrieval import index
+from app.storage import datasets
 from app.storage.objects import get_store
 
 MAX_ARTIFACT_CHARS = 20_000
@@ -136,7 +137,16 @@ def compare_runs(run_a: str, run_b: str) -> str:
 
 @tool
 def start_run(prompt: str, dataset_ids: list[str], parent_run_id: str | None = None) -> str:
-    """Propose a new run. Does not start it: the user must confirm in the UI."""
+    """Propose a new run. Does not start it: the user must confirm in the UI. A run needs at least one
+    dataset with role measured_pattern; a reference structure alone cannot be refined."""
+    # Same checks as POST /runs, so the user is told now instead of getting a 400 on confirm
+    try:
+        roles = {datasets.load_manifest(i).role for i in dataset_ids}
+    except datasets.ManifestError as e:
+        return json.dumps({"error": str(e)})
+    if "measured_pattern" not in roles:
+        return json.dumps({"error": "no dataset with role measured_pattern selected; ask the user to add a "
+                                    "measured scan (e.g. nist-srm-640f) to the inputs"})
     return json.dumps({"proposed_run": {"prompt": prompt, "dataset_ids": dataset_ids, "parent_run_id": parent_run_id},
                        "note": "Waiting for the user to confirm in the UI."})
 
