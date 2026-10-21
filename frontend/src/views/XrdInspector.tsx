@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api, xrd, type XrdSimulated } from "../api/client";
 import { type Overlay, XrdChart } from "../components/XrdChart";
-import { Button, cn, inputCls } from "../components/ui";
+import { Button, cn } from "../components/ui";
 
 const COLORS = ["#c2410c", "#15803d", "#7c3aed", "#b45309", "#0e7490"];
 export const CU_KA1 = 1.5405929;
@@ -56,13 +56,13 @@ export function XrdInspector({ datasetId, measured }: { datasetId: string; measu
       <div className="space-y-2 border-t border-line px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="font-medium text-ink-2">Overlay reflections of</span>
-          <select className={cn(inputCls, "h-7 w-auto")} value={pick} onChange={(e) => setPick(e.target.value)}>
+          <select className={cn("h-7 rounded-md border border-line-strong bg-surface px-2 text-xs outline-none focus:border-accent", "max-w-56")} value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">a structure in Storage…</option>
             {structures.map((d) => <option key={d.id} value={d.id}>{d.id}</option>)}
           </select>
           <Button size="sm" variant="secondary" disabled={!pick || !wavelength || add.isPending} onClick={() => add.mutate(`dataset:${pick}`)}>Add</Button>
           <span className="text-faint">or</span>
-          <input className={cn(inputCls, "h-7 w-24 font-mono")} placeholder="mp-149" value={mp} onChange={(e) => setMp(e.target.value)} />
+          <input className={cn("h-7 rounded-md border border-line-strong bg-surface px-2 text-xs outline-none focus:border-accent", "w-24 font-mono")} placeholder="mp-149" value={mp} onChange={(e) => setMp(e.target.value)} />
           <Button size="sm" variant="secondary" disabled={!mp.trim() || !wavelength || add.isPending} onClick={() => add.mutate(`mp:${mp.trim().replace(/^mp:/, "")}`)}>Add</Button>
           <label className="ml-1 flex items-center gap-1 text-[11px] text-muted" title="Isotropic volume scale, e.g. a DFT V0 relative to the structure">
             volume ×<input className="h-7 w-14 rounded border border-line-strong px-1 font-mono text-xs" value={scale} onChange={(e) => setScale(e.target.value)} /></label>

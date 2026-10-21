@@ -115,8 +115,12 @@ its input, how to read that input back the way the code itself will, how to laun
 parse its results. Register it in `codes/__init__.py`, and the request API, the checks, the runner
 and the UI pick it up automatically. Shipped: exciting (FP-(L)APW+lo), Questaal (FP-LMTO),
 Quantum ESPRESSO (pw.x; pseudopotentials from your `QE_PSEUDO_DIR`, cutoffs from an SSSP JSON or the
-pseudopotential headers, never guessed) and VASP (POSCAR/KPOINTS/INCAR; the licensed POTCAR is
-assembled only from your own `VASP_PP_PATH`). All codes use the same Γ-centred k-mesh. Settings a request does not specify are left at
+pseudopotential headers, never guessed), VASP (POSCAR/KPOINTS/INCAR; the licensed POTCAR is
+assembled only from your own `VASP_PP_PATH`), GPAW (PAW, plane waves, driven through ASE) and ABINIT
+(PseudoDojo norm-conserving pseudopotentials, ecut from PseudoDojo's hints; the input is written
+with explicit units because ASE's ABINIT writer forces LDA and a shifted k-mesh). All codes use the
+same Γ-centred k-mesh. SIESTA is next: it is on conda-forge, but its PseudoDojo psml files are only
+served from pseudo-dojo.org, which was unreachable when this was written. Settings a request does not specify are left at
 the code's own documented defaults, and the adapter reports them.
 
 ```bash
@@ -153,6 +157,30 @@ Pick one and **Plan and run**:
 Tested end to end on Si, C, GaAs, MgO, NaCl, LiF, Al, GaN, Cu and ZnO (inputs and checks for all four
 codes; Quantum ESPRESSO runs locally for all ten, metals via the smearing fix).
 
+### Convergence and equations of state across codes
+
+Runs & studies → **Convergence**: for every code installed here, a k-mesh series (k-point spacings
+0.5 → 0.15 Å⁻¹) then a basis series (×0.8 … ×2 of the code's default or recommended cutoff). A setting is
+converged when it is within 1 meV/atom of the most accurate point and a more accurate point confirms it.
+
+**Equation of state**: 7 volumes, 94–106 % (the Delta-test protocol), at the converged settings,
+Birch–Murnaghan fit per code (V₀, B₀, B′, cubic a₀), and the Delta gauge between every pair of codes
+(`ase.utils.deltacodesdft`). For elemental crystals in the Delta-test phase the all-electron WIEN2k
+reference is added. All-electron codes keep their muffin-tin radii fixed across volumes (touching at 94 %).
+Each code's equilibrium structure can be saved to Storage, and the cubic a₀ is shown next to XRD-refined
+lattice constants from the XRD workflow.
+
+Silicon, PBE (this laptop): QE+SSSP a₀ = 5.4696 Å, Δ vs WIEN2k 0.03 meV/atom; Questaal a₀ = 5.4728 Å,
+Δ vs WIEN2k 0.74 meV/atom.
+
+### XRD for experimentalists and theorists
+
+Storage → any measured pattern or structure opens an **XRD inspector**: the measured scan (zoomable,
+log/linear) with simulated reflections (conventional-cell hkl) of any structure in Storage or any
+Materials Project id overlaid, optionally scaled to a computed volume. Storage can also **import a
+Materials Project structure** and **save a DFT equilibrium structure**; both become reference structures
+the XRD refinement can use. The module layout (`app/xrd/`) leaves room for other spectroscopies.
+
 ### Codes for people who have nothing installed
 
 The DFT panel offers one-click installs of open-source codes and their data, into
@@ -163,6 +191,9 @@ The DFT panel offers one-click installs of open-source codes and their data, int
 | micromamba | package installer (single binary) | official mamba-org GitHub release | BSD-3 / MIT | SHA-256 from the release |
 | Quantum ESPRESSO 7.6 | `pw.x` and friends | conda-forge `qe` (OpenMPI build) | GPL-2.0 | binary present, `ldd` finds every library |
 | SSSP 1.3 PBE / PBEsol efficiency | pseudopotentials + recommended cutoffs | Materials Cloud Archive | CC-BY 4.0 | MD5 from the archive's file listing; per-file MD5 rechecked in every input set |
+| GPAW 26.7 + gpaw-data | PAW code + setups | conda-forge | GPL-3.0 | `ldd` |
+| ABINIT 10.0.3 | `abinit` | conda-forge | GPL-3.0 | `ldd` |
+| PseudoDojo NC PBE v0.4 (standard) | pseudopotentials + cutoff hints | github.com/PseudoDojo | CC-BY 4.0 | MD5 from `standard.djson`, rechecked per set |
 
 Installed codes become runnable locally with no configuration (an implicit `local` target). exciting and
 Questaal are open source but not packaged on conda-forge (build from source and set `EXCITING_BIN` /

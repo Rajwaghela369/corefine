@@ -218,3 +218,39 @@ def test_api_import_results_and_runs_in_job(seeded, no_index, tmp_path, monkeypa
         assert bad.status_code == 400
         assert c.post(f"/dft/jobs/{job['id']}/runs", json={"code": "exciting", "target": "nope"}).status_code == 400
         assert all(t["kind"] == "local" for t in c.get("/dft/targets").json())  # only the implicit local target
+
+
+# --- GPAW and ABINIT ------------------------------------------------------------
+
+def test_gpaw_inputs_and_parser(tmp_path):
+    g = REGISTRY["gpaw"]
+    req = CalcRequest(structure="x", codes=["gpaw"], kmesh=(4, 4, 4))
+    info = g.write(SI, req, tmp_path, get_settings(), "Si")
+    assert "PW(340.0)" in (tmp_path / "gpaw_scf.py").read_text() and info["defaults"]["values"]["ecut_eV"] == 340.0
+    report = checks.run_checks(SI, req, "227", {"gpaw": g.read_back(tmp_path, req)})
+    assert report["passed"], [r for r in report["results"] if r["ok"] is False]
+    r = g.parse_results(FIX / "gpaw_si")
+    assert r.converged and r.scf_iterations == 8 and r.gap_eV == pytest.approx(0.706)
+
+
+def test_abinit_inputs_have_units_and_no_forced_ixc(tmp_path, monkeypatch):
+    lib = tmp_path / "dojo"
+    lib.mkdir()
+    (lib / "standard.djson").write_text(json.dumps({"pseudos_metadata": {"Si": {
+        "basename": "Si.psp8", "md5": "x", "hints": {"normal": {"ecut": 18.0}}}}}))
+    (lib / "Si.psp8").write_text("Si    ONCVPSP\n14.0000      4.0000      170510    zatom,zion,pspd\n"
+                                 "8      11   2     4   600     0    pspcod,pspxc,lmax,lloc,mmax,r2well\n")
+    a = REGISTRY["abinit"]
+    monkeypatch.setattr(type(a), "library", lambda self, f: lib)
+    req = CalcRequest(structure="x", codes=["abinit"], kmesh=(4, 4, 4), basis_scale=1.25)
+    info = a.write(SI, req, tmp_path / "run", get_settings(), "Si")
+    text = (tmp_path / "run" / "abinit.abi").read_text()
+    assert "acell 3*1.0 angstrom" in text and "shiftk 0 0 0" in text and "\nixc" not in text
+    assert info["defaults"]["values"]["ecut_Ha"] == 22.5  # 18 Ha PseudoDojo hint x 1.25
+    report = checks.run_checks(SI, req, "227", {"abinit": a.read_back(tmp_path / "run", req)})
+    assert report["passed"], [r for r in report["results"] if r["ok"] is False]
+
+
+def test_abinit_parser_on_real_si_output():
+    r = REGISTRY["abinit"].parse_results(FIX / "abinit_si")
+    assert r.converged and r.scf_iterations == 8 and r.raw["etotal_Ha"] < -8

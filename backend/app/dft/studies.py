@@ -31,6 +31,8 @@ BASIS_NOTES = {
     "exciting": "rgkmax, x sqrt(scale)",
     "questaal": "gmax (interstitial density mesh), x sqrt(scale); does not test LMTO basis completeness",
     "vasp": "ENCUT, x scale of the POTCAR ENMAX",
+    "gpaw": "PW ecut, x scale of 340 eV",
+    "abinit": "ecut, x scale of the PseudoDojo normal hint",
 }
 
 

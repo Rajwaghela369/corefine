@@ -104,7 +104,7 @@ function DatasetDetail({ d }: { d: DatasetNode }) {
   const files = d.files.filter((f) => f !== "dataset.yaml");
   const info: [string, unknown][] = [
     ["Role", ROLE_LABEL[d.role ?? ""] ?? "—"], ["Technique", man.technique], ["Material", man.material], ["Format", man.format],
-    ["Radiation", inst.radiation], ["Wavelength", inst.wavelength_A != null ? `${num(inst.wavelength_A)} Å` : undefined],
+    ["Radiation", inst.radiation], ["Wavelength", inst.wavelength_A != null ? `${num(inst.wavelength_A, 10)} Å` : undefined],
     ["Wavelength source", inst.wavelength_source], ["Source", man.source],
   ];
 

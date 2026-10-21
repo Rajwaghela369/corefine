@@ -190,7 +190,8 @@ async def import_results(job_id: str, code: str, files: list[UploadFile]):
 
 # --- installing codes ---------------------------------------------------------------
 
-CODE_TOOLS = {"espresso": ["qe", "sssp-pbe"]}  # what one click installs to make a code usable locally
+# what one click installs to make a code usable locally
+CODE_TOOLS = {"espresso": ["qe", "sssp-pbe"], "gpaw": ["gpaw"], "abinit": ["abinit", "pseudodojo-pbe"]}
 
 
 @router.get("/tools")

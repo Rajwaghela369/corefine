@@ -50,6 +50,15 @@ RECIPES: dict[str, dict] = {
     "sssp-pbesol": {"label": "SSSP 1.3 PBEsol efficiency pseudopotentials", "kind": "sssp", "file": "SSSP_1.3.0_PBEsol_efficiency",
                     "functional": "PBEsol", "license": "CC-BY 4.0", "size": "60 MB",
                     "source": "Materials Cloud Archive, SSSP record"},
+    "gpaw": {"label": "GPAW", "kind": "conda", "package": "gpaw", "channel": "conda-forge", "specs": ["gpaw", "gpaw-data"],
+             "provides": {"gpaw": "bin/gpaw"}, "license": "GPL-3.0", "size": "about 400 MB",
+             "source": "conda-forge (gpaw + gpaw-data PAW setups)"},
+    "abinit": {"label": "ABINIT", "kind": "conda", "package": "abinit", "channel": "conda-forge",
+               "provides": {"abinit": "bin/abinit"}, "license": "GPL-3.0", "size": "about 400 MB",
+               "source": "conda-forge (https://anaconda.org/conda-forge/abinit)"},
+    "pseudodojo-pbe": {"label": "PseudoDojo NC PBE v0.4 (standard)", "kind": "pseudodojo", "repo": "ONCVPSP-PBE-PDv0.4",
+                       "branch": "master", "functional": "PBE", "license": "CC-BY 4.0", "size": "about 10 MB",
+                       "source": "github.com/PseudoDojo/ONCVPSP-PBE-PDv0.4 (standard.djson: files, MD5, cutoff hints)"},
 }
 NOT_INSTALLABLE = {"vasp": "VASP is commercial software; CoRefine cannot install it. Inputs are still generated.",
                    "exciting": "exciting is open source but not packaged on conda-forge; build it from "
@@ -104,10 +113,11 @@ def managed_executable(code: str) -> Path | None:
     return None
 
 
-def managed_pseudo_dir(functional: str) -> Path | None:
+def managed_pseudo_dir(functional: str, kind: str = "sssp") -> Path | None:
+    """Installed pseudopotential library for a functional: kind 'sssp' (QE) or 'pseudodojo' (ABINIT, norm-conserving)."""
     for name, r in RECIPES.items():
-        if r["kind"] == "sssp" and r["functional"] == functional and installed(name):
-            d = tools_dir() / "pseudos" / r["file"]
+        if r["kind"] == kind and r["functional"] == functional and installed(name):
+            d = tools_dir() / "pseudos" / (r.get("file") or r["repo"])
             if d.is_dir():
                 return d
     return None
@@ -135,6 +145,8 @@ def _install(name: str) -> None:
     try:
         if r["kind"] == "conda":
             version = _install_conda(name, r, log)
+        elif r["kind"] == "pseudodojo":
+            version = _install_pseudodojo(name, r, log)
         else:
             version = _install_sssp(name, r, log)
         _set(name, status="installed", message="ready", version=version, finished=now())
@@ -250,3 +262,30 @@ def _install_sssp(name: str, r: dict, log: Path) -> str:
     if n < 50:
         raise ToolError(f"only {n} pseudopotential files after unpacking")
     return f"{r['file']} ({n} elements, record {latest})"
+
+
+GITHUB_RAW = "https://raw.githubusercontent.com/PseudoDojo/{repo}/{branch}/{path}"
+
+
+def _install_pseudodojo(name: str, r: dict, log: Path) -> str:
+    """standard.djson lists the recommended pseudopotential per element with its MD5 and cutoff hints."""
+    url = GITHUB_RAW.format(repo=r["repo"], branch=r["branch"], path="standard.djson")
+    _set(name, message="downloading the PseudoDojo index (standard.djson)")
+    resp = httpx.get(url, follow_redirects=True, timeout=60)
+    if resp.status_code != 200:
+        raise ToolError(f"PseudoDojo index: HTTP {resp.status_code}")
+    meta = resp.json()["pseudos_metadata"]
+    dest = tools_dir() / "pseudos" / r["repo"]
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "standard.djson").write_bytes(resp.content)
+    with httpx.Client(follow_redirects=True, timeout=60) as client:
+        for i, (el, m) in enumerate(sorted(meta.items()), 1):
+            target = dest / m["basename"]
+            if target.is_file() and hashlib.md5(target.read_bytes()).hexdigest() == m["md5"]:
+                continue
+            _set(name, message=f"downloading {m['basename']} ({i}/{len(meta)})")
+            data = client.get(GITHUB_RAW.format(repo=r["repo"], branch=r["branch"], path=f"{el}/{m['basename']}")).content
+            if hashlib.md5(data).hexdigest() != m["md5"]:
+                raise ToolError(f"{m['basename']}: MD5 mismatch with standard.djson")
+            target.write_bytes(data)
+    return f"{r['repo']} standard ({len(meta)} elements)"

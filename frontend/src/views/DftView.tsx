@@ -393,7 +393,8 @@ function ChecksPane({ job }: { job: DftJob }) {
 }
 
 function RunsAndStudies({ job }: { job: DftJob }) {
-  const [tab, setTab] = useState<"runs" | "convergence" | "eos">("runs");
+  const initial = new URLSearchParams(window.location.search).get("study");  // ?study=eos opens that tab (shareable link)
+  const [tab, setTab] = useState<"runs" | "convergence" | "eos">(initial === "eos" || initial === "convergence" ? initial : "runs");
   return (
     <div className="flex h-full flex-col">
       <div className="flex gap-1 border-b border-line bg-subtle/60 px-2 py-1">
