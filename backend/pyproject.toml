@@ -23,6 +23,9 @@ dependencies = [
     "pandas>=3.0",
     "gemmi>=0.7.5",
     "pyyaml>=6.0",
+    "ase>=3.29",
+    "excitingtools>=2.0",
+    "spglib>=2.8.0",
 ]
 
 [project.optional-dependencies]

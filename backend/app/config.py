@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_HOST: str = ""
 
+    # All-electron DFT codes (input generation and local checks). Unset = that code is skipped.
+    EXCITING_ROOT: Path | None = None        # exciting source tree: species/ and xml/schema/
+    QUESTAAL_BIN: Path | None = None         # folder with blm, lmfa, lmchk, lmf
+    QUESTAAL_LIB_ROOT: Path | None = None    # Spack opt/ tree whose lib dirs Questaal binaries need
+    MP_API_KEY: str = ""                     # optional; Materials Project works without it via OPTIMADE
+
     LOCAL_DATA_DIR: Path = BACKEND_DIR / ".local"
     SEED_DATA_DIR: Path = REPO_DIR / "data"
     FRONTEND_ORIGIN: str = "http://localhost:5173"

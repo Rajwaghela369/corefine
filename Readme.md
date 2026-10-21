@@ -102,3 +102,26 @@ the spec errors found while building, and the design decisions.
 - NIST SRM 640f raw XRPD data, mds2-2251, [doi:10.18434/M32251](https://doi.org/10.18434/M32251), NIST open licence.
 - NIST SRM 640f certificate (26 Feb 2019): certified value and the Table 1 wavelength.
 - COD 9008565, silicon (Wyckoff), [crystallography.net](https://www.crystallography.net/cod/9008565.html).
+
+## All-electron DFT inputs (exciting + Questaal)
+
+`backend/app/dft/` turns a structure into checked ground-state inputs for exciting (LAPW+lo) and
+Questaal (FP-LMTO). Code writes every input; the LLM only turns a plain-language request into typed
+settings.
+
+```bash
+cd backend
+uv run python scripts/dft_inputs.py --source cod:9008565 --xc PBE --kmesh 2 2 2 --out runs/si-pbe
+uv run python scripts/dft_inputs.py --source mp:mp-149 --out runs/si-mp        # Materials Project via OPTIMADE, no key
+uv run python scripts/dft_inputs.py --prompt "DFT PBE for Si (mp-149), simple 2x2x2 k-mesh, normal inputs" --out runs/si
+```
+
+Sources: a local `.cif`, `cod:<id>` or `mp:<mp-id>`. The structure is reduced to the standard
+primitive cell (spglib). exciting gets `input.xml` with the species files copied alongside, validated
+against exciting's own schema. Questaal gets `init.<ext>`, then Questaal's `blm --express`, `lmfa`
+(which sets gmax) and `lmchk` run locally. Each input is then read back as its code would read it
+and compared: formula, space group, volume per atom, nearest-neighbour distance, k-mesh, functional,
+Questaal's own symmetry count and sphere overlaps. Results go to `checks.json`, `provenance.json` and
+`SUMMARY.md`. "Normal inputs" means each code's documented defaults, and the summary lists them.
+
+Set `EXCITING_ROOT`, `QUESTAAL_BIN` and (for Spack builds) `QUESTAAL_LIB_ROOT` in `backend/.env`.

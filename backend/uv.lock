@@ -570,9 +570,11 @@ source = { virtual = "." }
 default-groups = ["dev", "science"]
 dependencies = [
     { name = "anthropic" },
+    { name = "ase" },
     { name = "boto3" },
     { name = "daytona" },
     { name = "deepagents" },
+    { name = "excitingtools" },
     { name = "fastapi", extra = ["standard"] },
     { name = "gemmi" },
     { name = "httpx" },
@@ -586,6 +588,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "qdrant-client" },
+    { name = "spglib" },
     { name = "sqlalchemy" },
 ]
 
@@ -612,9 +615,11 @@ science = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=1.17" },
+    { name = "ase", specifier = ">=3.29" },
     { name = "boto3", specifier = ">=1.43" },
     { name = "daytona", specifier = ">=0.225" },
     { name = "deepagents", specifier = ">=0.7" },
+    { name = "excitingtools", specifier = ">=2.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.157" },
     { name = "fastembed", marker = "extra == 'embed'", specifier = ">=0.9" },
     { name = "gemmi", specifier = ">=0.7.5" },
@@ -629,6 +634,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.11" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "qdrant-client", specifier = ">=1.19" },
+    { name = "spglib", specifier = ">=2.8.0" },
     { name = "sqlalchemy", specifier = ">=2.1" },
 ]
 provides-extras = ["embed"]
@@ -956,6 +962,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f5/22/900cb125c76b7aaa450ce02fd727f452243f2e91a61af068b40adba60ea9/email_validator-2.3.0.tar.gz", hash = "sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426", size = 51238, upload-time = "2025-08-26T13:09:06.831Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/de/15/545e2b6cf2e3be84bc1ed85613edd75b8aea69807a71c26f4ca6a9258e82/email_validator-2.3.0-py3-none-any.whl", hash = "sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4", size = 35604, upload-time = "2025-08-26T13:09:05.858Z" },
+]
+
+[[package]]
+name = "excitingtools"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8d/d3/a5f2404ba9ec971964e6eccb736edb3f1be5f64674da827ee5c6ac78acbb/excitingtools-2.0.0.tar.gz", hash = "sha256:3669f2e31da022d45b04f5b9f4397ecbfd8f7c1fefeb7e7f08ac1a9b026eaa04", size = 240076, upload-time = "2026-09-04T10:20:35.974Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/21/bd2bf9d5b8a9666d209b3b6fea6691f2a47480ea0d85c7ce16ef2dbcc379/excitingtools-2.0.0-py3-none-any.whl", hash = "sha256:c49562d8e1c8f8a08f8691664e5e84f934953d262bf200b1509c7a23890a414c", size = 137134, upload-time = "2026-09-04T10:20:34.25Z" },
 ]
 
 [[package]]
