@@ -117,7 +117,21 @@ export interface DftJob {
   checks: { passed: boolean; results: DftCheck[]; reference: Record<string, any>; codes: Record<string, any> };
   runs: Record<string, DftRun>;
   plan: DftPlan | null;
+  studies: { convergence?: ConvergenceStudy; eos?: EosStudy };
 }
+export interface StudyPoint { ok: boolean; e_per_atom_eV?: number; volume_per_atom_A3?: number; error?: string; scf_iterations?: number }
+export interface ConvergenceStudy { status: string; message?: string; criterion: string; tol_meV_per_atom: number;
+  codes: Record<string, { kpoints: (StudyPoint & { kmesh: number[] })[]; basis: (StudyPoint & { basis_scale: number })[];
+    converged_kmesh: number[] | null; converged_basis_scale: number | null }> }
+export interface EosFit { V0_A3_per_atom: number; E0_eV_per_atom: number; B0_GPa: number; B0_prime: number; V0_over_source: number }
+export interface EosStudy { status: string; message?: string; protocol: string; scales: number[];
+  codes: Record<string, { points: (StudyPoint & { scale: number })[]; fit?: EosFit; error?: string;
+    settings: { kmesh: number[]; basis_scale: number; from_convergence: boolean } }>;
+  delta_meV_per_atom: Record<string, number> }
+export interface XrdMeasured { dataset: string; file: string; files: string[]; x: number[]; y: number[]; n_points: number;
+  range: [number, number]; wavelength_A: number | null; wavelength_source: string | null; radiation: string | null }
+export interface XrdPeak { two_theta: number; intensity: number; d_A: number; hkl: string; multiplicity: number }
+export interface XrdSimulated { label: string; wavelength_A: number; peaks: XrdPeak[]; note: string }
 export interface DftCode { name: string; label: string; method: string; available: boolean; reason: string; functionals: string[] }
 export interface DftResults { converged: boolean | null; total_energy_eV: number | null; fermi_eV: number | null;
   gap_eV: number | null; scf_iterations: number | null; warnings: string[]; raw: Record<string, unknown> }
@@ -145,6 +159,9 @@ export const dft = {
   archiveUrl: (id: string) => `${API}/dft/jobs/${id}/archive`,
   targets: () => fetch(`${API}/dft/targets`).then(json<DftTarget[]>),
   tools: () => fetch(`${API}/dft/tools`).then(json<DftTools>),
+  startStudy: (id: string, kind: "convergence" | "eos") => fetch(`${API}/dft/jobs/${id}/studies/${kind}`, { method: "POST" }).then(json),
+  saveEos: (id: string, code: string) => fetch(`${API}/dft/jobs/${id}/studies/eos/${code}/save`, { method: "POST" })
+    .then(json<{ dataset: string }>),
   searchMaterials: (q: string) => fetch(`${API}/dft/materials?q=${encodeURIComponent(q)}`).then(json<MpMaterial[]>),
   workflow: (body: { material: string; goal?: string; functional?: string; kmesh?: number[] | null; codes?: string[] }) =>
     fetch(`${API}/dft/workflow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -162,4 +179,14 @@ export const dft = {
     fd.append("file", f);
     return fetch(`${API}/dft/upload`, { method: "POST", body: fd }).then(json<{ structure: string; name: string; cell: DftCell }>);
   },
+};
+
+export const xrd = {
+  measured: (id: string, file?: string) =>
+    fetch(`${API}/xrd/measured/${id}${file ? `?file=${encodeURIComponent(file)}` : ""}`).then(json<XrdMeasured>),
+  simulate: (body: { structure: string; wavelength_A: number; two_theta_min?: number; two_theta_max?: number; volume_scale?: number }) =>
+    fetch(`${API}/xrd/simulate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(json<XrdSimulated>),
+  importMp: (mp_id: string) => fetch(`${API}/xrd/import/materials-project`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mp_id }) }).then(json<{ dataset: string }>),
 };

@@ -154,7 +154,7 @@ class EspressoAdapter(CodeAdapter):
             else:
                 raise EspressoSetupError(f"no cutoff recommendation for {p.name} (header or SSSP JSON); pw.x has no default")
             shutil.copy2(p, outdir / p.name)
-        ecutwfc, ecutrho = max(wfc), max(rho)
+        ecutwfc, ecutrho = max(wfc) * req.basis_scale, max(rho) * req.basis_scale
         input_data = {"control": {"calculation": "scf", "prefix": "pwscf", "pseudo_dir": "./", "outdir": "./tmp",
                                   "title": title[:70]},
                       "system": {"ecutwfc": ecutwfc, "ecutrho": ecutrho,
@@ -165,6 +165,7 @@ class EspressoAdapter(CodeAdapter):
                       crystal_coordinates=True)
         return {"files": sorted(f.name for f in outdir.iterdir()),
                 "set_explicitly": {"K_POINTS": f"automatic {' '.join(map(str, req.kmesh))} 0 0 0 (Gamma-centred)",
+                                   **({"cutoffs": f"x{req.basis_scale} the recommended ecutwfc/ecutrho"} if req.basis_scale != 1 else {}),
                                    "functional": f"{req.functional}, via the pseudopotentials",
                                    **({"occupations": SMEARING_NOTE} if req.occupations == "smearing" else {})},
                 "defaults": {"source": f"pw.x defaults; cutoffs from {source}",

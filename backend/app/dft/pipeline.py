@@ -56,6 +56,8 @@ def prepare(req: CalcRequest, outdir: Path) -> dict:
 
     src = sources.load(req.structure, cache_dir=s.LOCAL_DATA_DIR / "structures")
     cell = structure.standard_primitive(src.atoms)
+    if req.volume_scale != 1.0:
+        cell = structure.scaled(cell, req.volume_scale)
     title = f"{cell.atoms.get_chemical_formula(mode='metal')} {req.functional} {req.task} from {req.structure}"
 
     sdir = outdir / "structure"

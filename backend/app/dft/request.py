@@ -24,6 +24,12 @@ class CalcRequest(BaseModel):
         default="auto", description="auto = each code's default (QE retries with smearing if it reports a metal); "
                                     "smearing = request smearing up front (metals)")
     task: Literal["groundstate"] = Field(default="groundstate", description="Only ground-state SCF for now")
+    # Used by convergence and equation-of-state studies; 1.0 = the structure and basis as planned
+    volume_scale: float = Field(default=1.0, gt=0.5, lt=1.5, description="Cell volume relative to the source structure")
+    basis_scale: float = Field(default=1.0, ge=0.5, le=4.0,
+                               description="Basis size relative to the code's default/recommended cutoff energy")
+    sphere_ref_scale: float | None = Field(default=None, description="All-electron codes: choose muffin-tin radii as at this "
+                                                                     "volume scale (smallest volume of an EOS), so they stay fixed")
     notes: str = Field(default="", description="Anything in the request that could not be expressed in the fields above")
 
     def unsupported(self) -> list[str]:

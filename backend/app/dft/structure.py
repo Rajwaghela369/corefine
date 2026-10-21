@@ -70,3 +70,9 @@ def standard_primitive(atoms: Atoms, symprec: float = SYMPREC) -> Cell:
     number, symbol = spacegroup_of(prim, symprec)
     return Cell(lattice=np.asarray(lattice, float), frac=frac, symbols=prim.get_chemical_symbols(),
                 spacegroup_number=number, spacegroup_symbol=symbol)
+
+
+def scaled(cell: Cell, volume_scale: float) -> Cell:
+    """Same crystal with every length multiplied by volume_scale^(1/3) (isotropic strain)."""
+    return Cell(lattice=cell.lattice * volume_scale ** (1 / 3), frac=cell.frac.copy(), symbols=list(cell.symbols),
+                spacegroup_number=cell.spacegroup_number, spacegroup_symbol=cell.spacegroup_symbol)

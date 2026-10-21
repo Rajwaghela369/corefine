@@ -83,12 +83,17 @@ class ExcitingAdapter(CodeAdapter):
             species[src.name] = hashlib.sha256(src.read_bytes()).hexdigest()
         atoms = [{"species": el, "position": [float(x) for x in pos]} for el, pos in zip(cell.symbols, cell.frac)]
         structure = ExcitingStructure(atoms, lattice=(cell.lattice / Bohr).tolist(), species_path="./")
-        gs = ExcitingGroundStateInput(xctype=XC[req.functional], ngridk=list(req.kmesh))
+        extra = {}
+        if req.basis_scale != 1.0:  # basis size ~ (rgkmax)^2, so an energy-like scale maps to sqrt on rgkmax
+            default = float(schema_defaults(root).get("rgkmax", "7.0d0").replace("d", "e"))
+            extra["rgkmax"] = round(default * req.basis_scale ** 0.5, 4)
+        gs = ExcitingGroundStateInput(xctype=XC[req.functional], ngridk=list(req.kmesh), **extra)
         inp = ExcitingInputXML(structure=structure, groundstate=gs, title=title)
         # excitingtools writes <atom ...> </atom>; the schema requires empty content, so self-close them
         (outdir / "input.xml").write_text(re.sub(r"<(atom\b[^>]*)>\s*</atom>", r"<\1/>", inp.to_xml_str()))
         return {"files": ["input.xml", *species],
-                "set_explicitly": {"xctype": XC[req.functional], "ngridk": " ".join(map(str, req.kmesh))},
+                "set_explicitly": {"xctype": XC[req.functional], "ngridk": " ".join(map(str, req.kmesh)),
+                                   **{k: str(v) for k, v in extra.items()}},
                 "defaults": {"source": "exciting schema (xml/schema/groundstate.xsd)", "values": schema_defaults(root)},
                 "species_sha256": species,
                 "units": "lattice vectors in bohr, positions fractional"}

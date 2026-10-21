@@ -3,6 +3,8 @@ import { AlertTriangle, FileText, Plus, RefreshCw, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { api, type DatasetNode } from "../api/client";
 import { Button, Dialog, Empty, Field, PanelHeader, cn, inputCls, num } from "../components/ui";
+import { XrdInspector } from "./XrdInspector";
+import { xrd } from "../api/client";
 
 const GROUPS = [
   { role: "measured_pattern", title: "Measured patterns" },
@@ -20,6 +22,7 @@ export function StorageView() {
   const rescan = useMutation({ mutationFn: api.rescan, onSuccess: () => qc.invalidateQueries({ queryKey: ["datasets"] }) });
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const data = tree.data ?? [];
   const current = data.find((d) => d.id === openId) ?? data.find((d) => d.role === "measured_pattern") ?? data.find((d) => d.valid) ?? null;
   const invalid = data.filter((d) => !d.valid);
@@ -30,6 +33,7 @@ export function StorageView() {
         <PanelHeader title="Datasets" meta={data.length ? String(data.length) : undefined} actions={<>
           <Button variant="ghost" size="sm" title="Re-index manifests" onClick={() => rescan.mutate()}>
             <RefreshCw size={13} className={cn(rescan.isPending && "animate-spin")} /></Button>
+          <Button variant="secondary" size="sm" onClick={() => setImporting(true)} title="Import a structure from Materials Project">MP</Button>
           <Button variant="primary" size="sm" onClick={() => setAdding(true)}><Plus size={13} /> Add dataset</Button>
         </>} />
         <div className="min-h-0 flex-1 overflow-auto pb-4">
@@ -56,6 +60,9 @@ export function StorageView() {
       <section className="min-h-0 overflow-auto">
         {current ? <DatasetDetail key={current.id} d={current} /> : <Empty title="No dataset selected" />}
       </section>
+      <Dialog title="Import from Materials Project" open={importing} onClose={() => setImporting(false)}>
+        <ImportMp onDone={(id) => { setImporting(false); setOpenId(id); qc.invalidateQueries({ queryKey: ["datasets"] }); }} />
+      </Dialog>
       <Dialog title="Add dataset" open={adding} onClose={() => setAdding(false)}>
         <AddDataset onDone={(id) => { setAdding(false); setOpenId(id); qc.invalidateQueries({ queryKey: ["datasets"] }); }} />
       </Dialog>
@@ -128,6 +135,16 @@ function DatasetDetail({ d }: { d: DatasetNode }) {
           ))}
         </dl>
       )}
+
+      {d.valid && (d.role === "measured_pattern" || d.role === "reference_structure") &&
+        <XrdInspector key={d.id} datasetId={d.id} measured={d.role === "measured_pattern"} />}
+      {man.computed && <div className="rounded-lg border border-line bg-surface p-3 text-xs">
+        <div className="mb-1 font-semibold">Computed structure</div>
+        <dl className="grid grid-cols-[140px_1fr] gap-y-1 font-mono text-[11px]">
+          {Object.entries(man.computed as Record<string, unknown>).map(([k, v]) => <div key={k} className="contents">
+            <dt className="font-sans text-muted">{k}</dt><dd>{typeof v === "number" ? num(v) : String(v)}</dd></div>)}
+        </dl>
+      </div>}
 
       <div className="grid grid-cols-[1fr_1fr] gap-5">
         <div className="rounded-lg border border-line bg-surface">
@@ -223,3 +240,18 @@ function AddDataset({ onDone }: { onDone: (id: string) => void }) {
   );
 }
 
+
+function ImportMp({ onDone }: { onDone: (id: string) => void }) {
+  const [id, setId] = useState("mp-149");
+  const imp = useMutation({ mutationFn: () => xrd.importMp(id.trim()), onSuccess: (r) => onDone(r.dataset) });
+  return (
+    <div className="space-y-3">
+      <Field label="Materials Project id" hint="Stored as a reference structure (symmetrized CIF): use it in XRD refinements, overlays and DFT.">
+        <input className={cn(inputCls, "font-mono")} value={id} onChange={(e) => setId(e.target.value)} />
+      </Field>
+      {imp.isError && <p className="text-xs text-bad">{String(imp.error instanceof Error ? imp.error.message : imp.error)}</p>}
+      <div className="flex justify-end"><Button variant="primary" disabled={!id.trim() || imp.isPending} onClick={() => imp.mutate()}>
+        {imp.isPending ? "Importing…" : "Import"}</Button></div>
+    </div>
+  );
+}

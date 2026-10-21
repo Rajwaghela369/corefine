@@ -7,6 +7,7 @@ estimates gmax, and lmchk checks sphere overlaps and symmetry. All three run in 
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -60,12 +61,13 @@ def init_text(cell: Cell, title: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def set_gmax_from_lmfa(outdir: Path, ext: str, lmfa_out: str) -> float:
-    """blm --express leaves gmax=NULL; lmfa estimates it. Write that estimate into ctrl, as the tutorials do."""
+def set_gmax_from_lmfa(outdir: Path, ext: str, lmfa_out: str, basis_scale: float = 1.0) -> float:
+    """blm --express leaves gmax=NULL; lmfa estimates it. Write that estimate into ctrl, as the tutorials do.
+    basis_scale multiplies the energy cutoff, so gmax (a wavevector) scales with its square root."""
     m = re.search(r"estimate HAM_GMAX from RSMH:\s*GMAX=\s*([\d.]+)", lmfa_out)
     if not m:
         raise QuestaalSetupError("lmfa did not report a GMAX estimate; cannot complete ctrl")
-    gmax = float(m.group(1))
+    gmax = round(float(m.group(1)) * basis_scale ** 0.5, 3)
     ctrl = outdir / f"ctrl.{ext}"
     text, n = re.subn(r"(?m)^(\s*gmax=\s*)NULL\b", rf"\g<1>{gmax}", ctrl.read_text())
     if n != 1:
@@ -112,18 +114,38 @@ class QuestaalAdapter(CodeAdapter):
         ext = "".join(c for c in empirical if c.isalnum())[:12] or "crystal"  # Si2 -> si, Al4O6 -> al2o3
         (outdir / f"init.{ext}").write_text(init_text(cell, title))
         nk = ",".join(map(str, req.kmesh))
+        blm_args = ["blm", "--express", XC_SWITCH[req.functional], f"--nk={nk}", "--ctrl=ctrl", "--digits", ext]
+        radii = None
+        if req.sphere_ref_scale and abs(req.sphere_ref_scale - req.volume_scale) > 1e-9:
+            # Delta-test practice: radii that touch at the smallest volume, identical for every volume of an EOS
+            from app.dft.structure import scaled
+
+            ref = outdir / "_sphere_ref"
+            ref.mkdir(exist_ok=True)
+            (ref / f"init.{ext}").write_text(init_text(scaled(cell, req.sphere_ref_scale / req.volume_scale), title))
+            if run(s, ref, blm_args).returncode != 0:
+                raise QuestaalSetupError("blm failed on the sphere-reference cell")
+            radii = dict(re.findall(r"atom=(\S+)\s+z=\s*\d+\s+r=\s*([\d.]+)", (ref / f"ctrl.{ext}").read_text()))
+            shutil.rmtree(ref)
         steps, gmax = {}, None
-        for name, args in (("blm", ["blm", "--express", XC_SWITCH[req.functional], f"--nk={nk}", "--ctrl=ctrl", "--digits", ext]),
-                           ("lmfa", ["lmfa", ext]), ("lmchk", ["lmchk", ext])):
+        for name, args in (("blm", blm_args), ("lmfa", ["lmfa", ext]), ("lmchk", ["lmchk", ext])):
             p = run(s, outdir, args)
             (outdir / f"{name}.log").write_text(p.stdout + ("\n--- stderr ---\n" + p.stderr if p.stderr else ""))
             steps[name] = {"command": " ".join(args), "exit_code": p.returncode}
             if p.returncode != 0:
                 raise QuestaalSetupError(f"{name} failed (exit {p.returncode}); see {name}.log:\n{(p.stderr or p.stdout)[-800:]}")
+            if name == "blm" and radii:
+                ctrl = outdir / f"ctrl.{ext}"
+                text = ctrl.read_text()
+                for atom, r in radii.items():
+                    text = re.sub(rf"(atom={re.escape(atom)}\s+z=\s*\d+\s+r=\s*)[\d.]+", rf"\g<1>{r}", text)
+                ctrl.write_text(text)
             if name == "lmfa":
-                gmax = set_gmax_from_lmfa(outdir, ext, p.stdout)
+                gmax = set_gmax_from_lmfa(outdir, ext, p.stdout, req.basis_scale)
         return {"files": sorted(f.name for f in outdir.iterdir() if f.is_file()),
-                "set_explicitly": {"functional switch": XC_SWITCH[req.functional], "nk": nk},
+                "set_explicitly": {"functional switch": XC_SWITCH[req.functional], "nk": nk,
+                                   **({"sphere radii": f"touching at volume x{req.sphere_ref_scale}: {radii}"} if radii else {}),
+                                   **({"gmax": f"x{req.basis_scale ** 0.5:.3f} the lmfa estimate"} if req.basis_scale != 1 else {})},
                 "defaults": {"source": "blm --express (basis, sphere radii); lmfa (gmax)", "values": {"gmax": gmax}},
                 "steps": steps}
 

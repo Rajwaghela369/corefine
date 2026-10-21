@@ -5,6 +5,7 @@ import { api, dft, type DftJob, type MpMaterial } from "../api/client";
 import { Quadrants } from "../components/Quadrants";
 import { Button, Empty, Field, PanelHeader, Tag, clock, cn, inputCls, num } from "../components/ui";
 import { RunsPane, livePollInterval } from "./DftRuns";
+import { ConvergencePane, EosPane } from "./DftStudies";
 
 type SourceKind = "find" | "storage" | "mp" | "cod" | "upload";
 const SOURCE_TABS: { id: SourceKind; label: string }[] = [
@@ -271,7 +272,8 @@ function JobList({ selected, onSelect }: { selected: string | null; onSelect: (i
 
 function JobWorkspace({ id }: { id: string }) {
   const q = useQuery({ queryKey: ["dft-job", id], queryFn: () => dft.job(id),
-    refetchInterval: (query) => livePollInterval(query.state.data) });
+    refetchInterval: (query) => livePollInterval(query.state.data) ||
+      (Object.values(query.state.data?.studies ?? {}).some((x) => x?.status === "running" || x?.status === "queued") ? 3000 : false) });
   if (q.isError) return <Empty title="Could not load this input set">{String(q.error)}</Empty>;
   if (!q.data) return <Empty title="Loading…" />;
   const job = q.data;
@@ -298,7 +300,7 @@ function JobWorkspace({ id }: { id: string }) {
         { key: "structure", title: "Structure", body: <StructurePane job={job} /> },
         { key: "checks", title: "Sanity checks", body: <ChecksPane job={job} /> },
         { key: "inputs", title: "Inputs", body: <InputsPane job={job} /> },
-        { key: "runs", title: "Runs & results", body: <RunsPane job={job} /> },
+        { key: "runs", title: "Runs & studies", body: <RunsAndStudies job={job} /> },
       ]} />
     </div>
   );
@@ -387,6 +389,21 @@ function ChecksPane({ job }: { job: DftJob }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function RunsAndStudies({ job }: { job: DftJob }) {
+  const [tab, setTab] = useState<"runs" | "convergence" | "eos">("runs");
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex gap-1 border-b border-line bg-subtle/60 px-2 py-1">
+        {([["runs", "Runs"], ["convergence", "Convergence"], ["eos", "Equation of state"]] as const).map(([k, l]) =>
+          <button key={k} onClick={() => setTab(k)} className={cn("rounded px-2 py-0.5 text-[11.5px]",
+            tab === k ? "bg-surface font-medium text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink")}>{l}
+            {k !== "runs" && job.studies?.[k]?.status === "running" && <span className="ml-1 text-accent">•</span>}</button>)}
+      </div>
+      <div className="min-h-0 flex-1">{tab === "runs" ? <RunsPane job={job} /> : tab === "convergence" ? <ConvergencePane job={job} /> : <EosPane job={job} />}</div>
+    </div>
   );
 }
 

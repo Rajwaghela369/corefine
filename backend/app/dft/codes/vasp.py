@@ -38,6 +38,14 @@ class VaspAdapter(CodeAdapter):
     def functionals(self) -> dict[str, str]:
         return GGA
 
+    def problems(self, req: CalcRequest) -> list[str]:
+        from app.config import get_settings
+
+        out = super().problems(req)
+        if req.basis_scale != 1.0 and not get_settings().VASP_PP_PATH:
+            out.append("VASP: a basis scan needs the POTCAR (ENCUT is set relative to its ENMAX)")
+        return out
+
     def write(self, cell: Cell, req: CalcRequest, outdir: Path, s: Settings, title: str) -> dict:
         outdir.mkdir(parents=True, exist_ok=True)
         atoms = cell.atoms
@@ -45,7 +53,8 @@ class VaspAdapter(CodeAdapter):
         species = list(dict.fromkeys(sorted(atoms.get_chemical_symbols())))
         k = " ".join(map(str, req.kmesh))
         (outdir / "KPOINTS").write_text(f"Gamma-centred {k} mesh\n0\nGamma\n {k}\n 0 0 0\n")
-        (outdir / "INCAR").write_text(f"SYSTEM = {title}\nGGA = {GGA[req.functional]}\n")
+        incar = f"SYSTEM = {title}\nGGA = {GGA[req.functional]}\n"
+        (outdir / "INCAR").write_text(incar)
         potcar = {"assembled": False, "reason": "VASP_PP_PATH not set (POTCARs are licensed)", "species": species}
         if s.VASP_PP_PATH and s.VASP_PP_PATH.is_dir():
             parts, titles = [], []
@@ -60,6 +69,9 @@ class VaspAdapter(CodeAdapter):
             else:
                 (outdir / "POTCAR").write_text("".join(parts))
                 potcar = {"assembled": True, "titles": titles, "sha256": hashlib.sha256("".join(parts).encode()).hexdigest()}
+                if req.basis_scale != 1.0:
+                    enmax = max(float(x) for x in re.findall(r"ENMAX\s*=\s*([\d.]+)", "".join(parts)))
+                    (outdir / "INCAR").write_text(incar + f"ENCUT = {enmax * req.basis_scale:.1f}\n")
         return {"files": sorted(f.name for f in outdir.iterdir()),
                 "set_explicitly": {"GGA": GGA[req.functional], "KPOINTS": f"Gamma-centred {k}"},
                 "defaults": {"source": "VASP defaults (VASP wiki); ENCUT follows the POTCAR's largest ENMAX",

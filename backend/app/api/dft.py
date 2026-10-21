@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.agents.llm import LLMError
 from app.config import get_settings
-from app.dft import execute, materials, sources, structure, tools, workflow
+from app.dft import execute, materials, sources, structure, studies, tools, workflow
 from app.dft.codes import REGISTRY
 from app.dft.codes.exciting import ExcitingSetupError
 from app.dft.codes.questaal import QuestaalSetupError
@@ -99,7 +99,7 @@ def get_job(job_id: str):
     summary = json.loads((d / "summary.json").read_text()) if (d / "summary.json").is_file() else None
     return {"id": job_id, "provenance": json.loads((d / "provenance.json").read_text()),
             "checks": json.loads((d / "checks.json").read_text()), "files": files, "runs": execute.all_states(d),
-            "plan": plan, "summary": summary}
+            "plan": plan, "summary": summary, "studies": studies.read(d)}
 
 
 @router.get("/jobs/{job_id}/files/{path:path}")
@@ -236,3 +236,27 @@ def start_workflow(body: WorkflowBody):
     except (*SETUP_ERRORS, materials.SearchError) as e:
         raise HTTPException(400, detail=str(e)) from e
     return {"id": job_id, "plan": out["plan"].model_dump(), "runs": out["runs"], "checks_passed": out["checks_passed"]}
+
+
+# --- convergence and equation-of-state studies ------------------------------------------
+
+@router.post("/jobs/{job_id}/studies/{kind}")
+def start_study(job_id: str, kind: str):
+    if kind not in ("convergence", "eos"):
+        raise HTTPException(404, detail="studies: convergence or eos")
+    try:
+        return studies.start(job_dir(job_id), kind)
+    except execute.ComputeConfigError as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@router.post("/jobs/{job_id}/studies/eos/{code}/save")
+def save_eos_structure(job_id: str, code: str):
+    """Store this code's equilibrium structure as a reference_structure dataset (usable by the XRD pipeline)."""
+    from app.storage.imports import save_computed_structure
+
+    try:
+        m = save_computed_structure(job_dir(job_id), code)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return {"dataset": m.id, "manifest": m.model_dump(exclude_none=True)}
