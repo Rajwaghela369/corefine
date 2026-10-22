@@ -1,12 +1,12 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, CornerDownLeft } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { api, type DatasetNode, type Engine } from "../api/client";
+import { api, type DatasetNode, type Engine, xrd } from "../api/client";
 import { instrumentLine } from "../components/labels";
 import { useGo } from "../components/nav";
 import { Picker, type PickerOption } from "../components/Picker";
 import { useDetailed } from "../components/prefs";
-import { Button, cn } from "../components/ui";
+import { Button, cn, inputCls } from "../components/ui";
 
 const AUTO = "__auto";
 
@@ -84,6 +84,8 @@ export function NewAnalysis({ session, datasets, onToggleDataset, onStarted }: {
                     sub: [detailed || !d.material ? d.id : null, d.material === scan?.material ? "same material as the scan" : null]
                       .filter(Boolean).join(" · ") || undefined }))]} />
           </div>}
+          {scan && !reference && !autoRef && <FindReference scan={scan}
+            onPick={(id) => { qc.invalidateQueries({ queryKey: ["datasets"] }); choose(references, null); onToggleDataset(id); }} />}
           {measured.length === 0 && <p className="text-[11.5px] text-muted">No measured scans yet. Add one under Data.</p>}
         </div>
       </StepBlock>
@@ -147,4 +149,33 @@ function scanOption(d: DatasetNode): PickerOption {
   // two scans of one material differ only by name, so the dataset name always shows
   return { value: d.id, label: d.material ? `${d.material} · ${d.id}` : d.id,
     sub: [instrumentLine(d.instrument), `${files} file${files === 1 ? "" : "s"}`].filter(Boolean).join(" · ") };
+}
+
+/** No crystal model for this scan yet: name the sample, see which Materials Project phases explain the peaks, use one. */
+function FindReference({ scan, onPick }: { scan: DatasetNode; onPick: (datasetId: string) => void }) {
+  const known = scan.material && scan.material.toLowerCase() !== "unknown" ? scan.material : "";
+  const [sample, setSample] = useState(known);
+  const find = useMutation({ mutationFn: () => xrd.identify({ dataset: scan.id, formula: sample.trim() }) });
+  const use = useMutation({ mutationFn: (mp: string) => xrd.importMp(mp), onSuccess: (r) => onPick(r.dataset) });
+  const err = (e: unknown) => String(e instanceof Error ? e.message : e);
+  return (
+    <div className="space-y-2 rounded-md border border-line bg-subtle p-2.5">
+      <div className="text-[11.5px] font-medium">No crystal structure for this scan yet</div>
+      <p className="text-[11px] text-muted">GSAS-II and MAUD need one. Say what the sample is and CoRefine ranks the Materials Project
+        phases by how many of your peaks they explain.</p>
+      <div className="flex gap-1.5">
+        <input className={inputCls} value={sample} placeholder="Formula or elements, e.g. Cu2O or Cu,O" onChange={(e) => setSample(e.target.value)} />
+        <Button size="sm" disabled={!sample.trim() || find.isPending} onClick={() => find.mutate()}>{find.isPending ? "Searching…" : "Find phases"}</Button>
+      </div>
+      {find.isError && <p className="text-[11px] text-bad">{err(find.error)}</p>}
+      {use.isError && <p className="text-[11px] text-bad">{err(use.error)}</p>}
+      {find.data && !find.data.ranked.length && <p className="text-[11px] text-muted">No candidate phases found for that sample.</p>}
+      {find.data?.ranked.slice(0, 5).map((r) => (
+        <div key={r.candidate} className="flex items-center justify-between gap-2 text-[11.5px]">
+          <span className="min-w-0"><b>{r.material.formula}</b> {r.material.spacegroup ?? ""} · explains {r.n_matched} of {r.n_strong} strong peaks
+            {r.strong_model_lines_missing.length > 0 && <span className="text-warn"> · {r.strong_model_lines_missing.length} predicted lines missing</span>}</span>
+          <Button size="sm" disabled={use.isPending} onClick={() => use.mutate(r.candidate)}>Use</Button>
+        </div>))}
+    </div>
+  );
 }
