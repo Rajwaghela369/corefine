@@ -26,7 +26,7 @@ ENGINES = {
     "agents": {"label": "Agents (Python)", "tool": None,
                "about": "Claude plans the analysis and writes the fitting code; every step runs in a sandbox"},
     "gsas2": {"label": "GSAS-II", "tool": "gsas2",
-              "about": "Rietveld refinement with GSAS-II (APS): background, cell, zero/displacement, profile, size, strain"},
+              "about": "Rietveld refinement with GSAS-II (APS): background, cell and displacement, profile, size, strain"},
     "maud": {"label": "MAUD", "tool": "maud",
              "about": "Rietveld refinement with MAUD (Lutterotti) in batch mode: background and scale, then cell and basic "
                       "parameters, then microstructure"},

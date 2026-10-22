@@ -20,8 +20,9 @@ export interface EngineInfo { name: Engine; label: string; about: string; availa
 export interface GroupRun { id: string; engine: Engine; label: string; status: string; error: string | null;
   metrics: Record<string, { value: number | null; uncertainty: number | null; unit: string | null }>;
   curve?: { x: number[]; observed: number[]; calculated: number[]; background: number[] };
-  reflections?: { two_theta: number; intensity: number; hkl: string }[] }
-export interface GroupView { group_id: string; dataset: string; runs: GroupRun[];
+  reflections?: { two_theta: number; intensity: number; hkl: string }[]; story: ExperimentStory }
+export interface GroupView { group_id: string; dataset: string; runs: GroupRun[]; material?: string; reference?: string; prompt?: string;
+  instrument?: { radiation?: string; wavelength_A?: number; wavelength_source?: string; ka2_present?: boolean | null };
   measured?: { file: string; x: number[]; y: number[]; wavelength_A: number };
   certified?: { a_A?: number; a_uncertainty_A?: number; c_A?: number; c_uncertainty_A?: number; source?: string } }
 export interface RunListItem { id: string; prompt: string; status: string; dataset_ids: string[];
@@ -141,7 +142,8 @@ export interface ExperimentStory { run: string; engine: Engine; status: string; 
   group_id: string | null; error: string | null; plan_title: string | null; plan_summary: string | null;
   steps: { idx: number; name: string; status: string; attempts: number; error: string | null; goal: string | null }[];
   log: { time: string; agent: string; note: string }[]; classification: string | null;
-  claim: { passed: boolean; checked: number } | null; result: Record<string, StoryMetric> }
+  claim: { passed: boolean; checked: number } | null; result: Record<string, StoryMetric>;
+  stages?: { stage: string; Rwp_percent: number; wizard?: number }[]; settings?: Record<string, unknown>; warnings?: string[] }
 export interface TheoryStory { set: string; created: string; goal: string | null;
   request: { structure: string; functional: string; kmesh: number[]; codes: string[] };
   cell: { formula: string; spacegroup: string; natoms: number }; lattice: { a_A?: number; c_A?: number };
@@ -159,7 +161,13 @@ export interface Bridge { material: string; experiment_reference: string | null;
     vs_experiment_percent: number | null; pressure_equivalent_GPa?: number; reference?: string }[];
   raman: { set: string; code: string; functional: string; frequency_cm1: number; label: string | null; raman_active: boolean; ir_active: boolean }[] }
 export interface StudyPoint { ok: boolean; e_per_atom_eV?: number; volume_per_atom_A3?: number; error?: string; scf_iterations?: number }
-export interface ConvergenceStudy { status: string; message?: string; criterion: string; tol_meV_per_atom: number;
+export interface ConvRow { setting: string; ok: boolean; e_per_atom_eV: number | null; delta_to_most_accurate_meV: number | null;
+  change_from_previous_meV: number | null; within: boolean; scf_iterations: number | null; error: string | null; healed: string | null;
+  is_reference: boolean }
+export interface ConvSeries { rows: ConvRow[]; verdict: string; chosen: string | null }
+export interface ConvReasoning { criterion: string; plan: string;
+  codes: Record<string, { kpoints: ConvSeries; basis: ConvSeries; basis_parameter: string | null; use: string; done: boolean }> }
+export interface ConvergenceStudy { status: string; message?: string; criterion: string; tol_meV_per_atom: number; reasoning?: ConvReasoning;
   codes: Record<string, { kpoints: (StudyPoint & { kmesh: number[] })[]; basis: (StudyPoint & { basis_scale: number })[];
     converged_kmesh: number[] | null; converged_basis_scale: number | null }> }
 export interface EosFit { V0_A3_per_atom: number; E0_eV_per_atom: number; B0_GPa: number; B0_prime: number; V0_over_source: number }

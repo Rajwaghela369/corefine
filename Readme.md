@@ -152,7 +152,14 @@ Three ideas keep it honest:
 
 ### Choose the engine: agents, GSAS-II or MAUD
 
-The same scan can be refined three ways, chosen with **Analyse with** in the Experiment form:
+*Experiment · XRD* is laid out like *Theory · DFT*. On the left are the form (measured scan, reference structure,
+analysis tools) and the list of analyses. On the right, the selected analysis has a header, summary cells and the
+tabs **Overview**, **Reasoning**, **Compare tools**, **Plots**, **Data** and **Report**. **Reasoning** shows each tool's
+steps top to bottom: who acted (language model, code or program), each decision taken before fitting and why
+(wavelength source, Kα2, geometry, what is refined and what stays fixed), what each refinement stage changed in
+Rwp, and the result against the certificate.
+
+The same scan can be refined three ways, chosen under **Analysis tools**:
 
 - **Agents (Python)**: Claude plans the analysis and writes the fitting code (peak positions, then the lattice
   parameter). It needs an Anthropic key.
@@ -163,8 +170,10 @@ The same scan can be refined three ways, chosen with **Analyse with** in the Exp
 - **MAUD** (Lutterotti): Rietveld refinement in MAUD's batch mode, starting from MAUD's own default analysis. Its wizard
   steps are background and scale, then cell and basic parameters, then microstructure.
 
-Pick more than one engine and each gets its own run, all in one comparison group. **Compare engines** overlays the
-measured scan, GSAS-II's calculated pattern and each engine's reflection positions from its refined cell. A table next
+Pick more than one tool and each gets its own run, all in one comparison group. **Compare tools** shows three things.
+The first is each tool's lattice parameter against the certificate (with 1σ bars and the ±0.0005 Å target). The second
+is Rwp after each refinement stage. The third overlays the measured scan, GSAS-II's calculated pattern and each tool's
+reflection positions from its refined cell. A table next
 to it lists every refined value against the certificate. Both programs install from the Experiment form: GSAS-II is
 built from a pinned commit (it is on neither PyPI nor conda-forge), and MAUD comes from its GitHub release with the
 SHA-256 GitHub records for it.
