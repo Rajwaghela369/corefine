@@ -76,3 +76,6 @@ certification does. This is a hypothesis, not tested.
 - **shadcn/ui-style components are hand-written** with Tailwind; the shadcn generator was not run.
 - **Langfuse removed.** Tracing was dropped on request (2026-10-22); `/health` checks five services
   and no `LANGFUSE_*` settings exist. The spec items about Langfuse traces no longer apply.
+- **Theory ↔ Experiment removed** (2026-10-22, on request): the `/bridge` endpoints, the comparison page and the
+  co-pilot's `theory_vs_experiment` tool are gone. The per-run reasoning story used by the XRD *Reasoning* tab moved
+  to `app/orchestration/story.py`; the Storage pattern comparison (`/xrd/compare`) stays.

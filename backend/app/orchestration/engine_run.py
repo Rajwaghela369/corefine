@@ -254,8 +254,8 @@ def group_view(group_id: str) -> dict:
     from pymatgen.core import Lattice, Structure
     from sqlalchemy import select
 
-    from app.api.bridge import run_story
     from app.models.db import MetricRow, RunRow, get_sessionmaker
+    from app.orchestration.story import run_story
     from app.xrd import patterns
 
     store = get_store()

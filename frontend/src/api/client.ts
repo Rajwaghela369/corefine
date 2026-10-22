@@ -149,22 +149,6 @@ export interface ExperimentStory { run: string; engine: Engine; status: string; 
   log: { time: string; agent: string; note: string }[]; classification: string | null;
   claim: { passed: boolean; checked: number } | null; result: Record<string, StoryMetric>;
   stages?: { stage: string; Rwp_percent: number; wizard?: number }[]; settings?: Record<string, unknown>; warnings?: string[] }
-export interface TheoryStory { set: string; created: string; goal: string | null;
-  request: { structure: string; functional: string; kmesh: number[]; codes: string[] };
-  cell: { formula: string; spacegroup: string; natoms: number }; lattice: { a_A?: number; c_A?: number };
-  decisions: { field: string; value: string; reason: string; source: string }[]; warnings: string[]; planner: string | null;
-  checks: { passed: boolean; n_passed: number; n_not_run: number; failed: { check: string; detail: string }[] };
-  codes: Record<string, string>;
-  runs: Record<string, { label: string; status: string; converged: boolean | null; iterations: number | null; gap_eV: number | null;
-    healed: { error: string; change: string; why: string } | null; message: string; attempts: number }>;
-  reference: { source: string; band_gap_eV: number | null; is_metal: boolean | null } | null }
-export interface Story { material: string; experiment: ExperimentStory[]; theory: TheoryStory[] }
-export interface Bridge { material: string; experiment_reference: string | null; notes: string[];
-  experiment: { run: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; classification: string | null }[];
-  certified: { dataset: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; source: string | null }[];
-  theory: { set: string; code: string; functional: string; a0_A: number; B0_GPa: number | null; kmesh: number[] | null;
-    vs_experiment_percent: number | null; pressure_equivalent_GPa?: number; reference?: string }[];
-  raman: { set: string; code: string; functional: string; frequency_cm1: number; label: string | null; raman_active: boolean; ir_active: boolean }[] }
 export interface StudyPoint { ok: boolean; e_per_atom_eV?: number; volume_per_atom_A3?: number; error?: string; scf_iterations?: number }
 export interface ConvRow { setting: string; ok: boolean; e_per_atom_eV: number | null; delta_to_most_accurate_meV: number | null;
   change_from_previous_meV: number | null; within: boolean; scf_iterations: number | null; error: string | null; healed: string | null;
@@ -218,8 +202,6 @@ export const dft = {
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, kmesh: kmesh ?? null }) }).then(json),
   planPreview: (material: string, functional: string) =>
     fetch(`${API}/dft/plan-preview?material=${encodeURIComponent(material)}&functional=${functional}`).then(json<{ plan: DftPlan; material: MpMaterial }>),
-  story: (material: string) => fetch(`${API}/bridge/story?material=${encodeURIComponent(material)}`).then(json<Story>),
-  bridge: (material: string) => fetch(`${API}/bridge?material=${encodeURIComponent(material)}`).then(json<Bridge>),
   saveEos: (id: string, code: string) => fetch(`${API}/dft/jobs/${id}/studies/eos/${code}/save`, { method: "POST" })
     .then(json<{ dataset: string }>),
   searchMaterials: (q: string) => fetch(`${API}/dft/materials?q=${encodeURIComponent(q)}`).then(json<MpMaterial[]>),

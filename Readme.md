@@ -11,9 +11,8 @@ CoRefine puts both in one place:
 |---|---|---|
 | **Experiment · XRD** | Agents plan an analysis of raw powder-diffraction data, write the code, run it in a sandbox and explain the result. | anyone with a scan |
 | **Theory · DFT** | Pick a material. CoRefine plans the calculation, writes checked inputs for six codes, installs the open-source ones, runs them on your laptop and shows each code's band gap and convergence. | anyone who wants a DFT number they can trust, including people with no DFT code installed yet |
-| **Theory ↔ Experiment** | The lattice constant from the scan next to the lattice constant from each code, with the differences, and the scan overlaid with what each model predicts. | both, in the same meeting |
 
-One rule runs through all three: **language models plan and explain, code produces numbers.** No
+One rule runs through both: **language models plan and explain, code produces numbers.** No
 LLM writes an input file, and no number reaches a report unless a file or a database row backs it.
 
 ---
@@ -23,7 +22,7 @@ LLM writes an input file, and no number reaches a report unless a file or a data
 1. [Try it on your laptop](#try-it-on-your-laptop)
 2. [Experiment: agentic XRD refinement](#experiment-agentic-xrd-refinement)
 3. [Theory: DFT for every code, for everyone](#theory-dft-for-every-code-for-everyone)
-4. [Theory ↔ Experiment](#theory--experiment)
+4. [Your structure against a real scan](#your-structure-against-a-real-scan)
 5. [Where the calculations run](#where-the-calculations-run)
 6. [Configuration](#configuration)
 7. [Tests](#tests)
@@ -61,9 +60,8 @@ Then try this five-minute tour:
    `backend/.local/tools/`, with no admin rights and nothing else on your system touched.
 2. Search `GaAs`, pick the stable phase and click **Generate**. You get inputs for every code, each
    one read back and checked.
-3. Open **Runs** and run it. Each code's band gap appears under **Overview**; **Theory ↔ Experiment** shows how each step went.
-4. **Lab → Experiment · XRD** has the silicon scans. **Lab → Theory ↔ Experiment** puts both sides
-   together.
+3. Open **Runs** and run it. Each code's band gap appears under **Overview**.
+4. **Analyse** has the silicon scans.
 
 What works where:
 
@@ -115,7 +113,7 @@ It reads only through tools, and every number it states must come from a tool re
   licence, checksum, wavelength and its source, temperature, reference-value source and uncertainty;
   it lists what is present and missing, it does not grade FAIRness);
 - theory: `list_dft_sets`, `get_dft_set` (request, defaults, checks, results, studies);
-- both: `theory_vs_experiment`, `compare_pattern`, `identify_phase`;
+- patterns: `compare_pattern`, `identify_phase`;
 - `start_run` proposes a run; nothing starts until you confirm.
 
 It says plainly what CoRefine cannot do yet: ARPES and band-structure comparison, surface slabs,
@@ -315,8 +313,7 @@ your cluster, can be uploaded and are parsed the same way.
 default cutoff). A setting counts as converged when it is within 1 meV/atom of the most accurate
 point **and a denser point confirms it**. One lucky point is not convergence.
 
-*The equation-of-state and Raman studies below remain in the backend and API (`/dft/jobs/{id}/studies/…`, the
-co-pilot's `theory_vs_experiment`) but are no longer shown in the UI, which concentrates on runs, band gaps and
+*The equation-of-state and Raman studies below remain in the backend and API (`/dft/jobs/{id}/studies/…`) but are no longer shown in the UI, which concentrates on runs, band gaps and
 convergence.*
 
 **Equation of state across codes.** Seven volumes from 94 to 106 % (the Δ-test protocol), a
@@ -400,26 +397,9 @@ Each set is a folder with one subfolder per code, plus `checks.json`, `provenanc
 
 ---
 
-## Theory ↔ Experiment
+## Your structure against a real scan
 
-This is where the two halves meet. It is useful to a theorist who has never refined a scan and to an
-experimentalist who has never run DFT.
-
-**How each side got its answer.** For one material, *Lab → Theory ↔ Experiment* tells both stories side by side,
-read top to bottom. Each step says who took it (a language model, plain code or a scientific program), what it did,
-the reason recorded at the time, and any retries or automatic fixes.
-
-- **Experiment:** inputs (scan and reference structure, with the answer hidden) → plan (Claude, or a fixed recipe for
-  GSAS-II/MAUD) → each step with its goal, status and attempts → comparison with the certificate (code) → report
-  and claim check. Every agent's notes from the experiment log open underneath.
-- **Theory:** structure source → every setting with its reason (your request, a CoRefine rule or Materials Project) →
-  inputs for six codes and their read-back checks → each code's SCF run (iterations, gap, any self-heal) → band gaps
-  next to Materials Project's.
-- **Where the two meet:** the lattice parameter the calculation assumed against the refined measurement.
-
-Everything on the page is read from run and set files (`GET /bridge/story?material=…`).
-
-**Your structure against a real scan.** Open any measured pattern in Storage and choose a model
+Open any measured pattern in Storage and choose a model
 structure: a DFT equilibrium structure, a COD or Materials Project entry, anything in Storage.
 CoRefine then:
 
@@ -491,15 +471,14 @@ uv run pytest -m integration       # the 3 that call real services (keys needed)
 - a full run that recovers from a broken first script and from an invented number in the report;
 - the SSE stream.
 
-**DFT and bridge side:**
+**DFT side:**
 - every adapter's write-and-read-back on several materials;
 - the Materials Project ID handling;
 - result parsing against real output files (exciting from a cluster, Questaal, GPAW and ABINIT kept
   as fixtures), Questaal's automatic restart, and the Slurm flow against a fake cluster;
 - the convergence rule, the EOS fit and the Δ-gauge;
 - Raman selection rules;
-- peak matching, scale fitting and phase identification;
-- the bridge aggregation.
+- peak matching, scale fitting and phase identification.
 
 ---
 

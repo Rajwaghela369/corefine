@@ -32,14 +32,14 @@ SYSTEM = """You are the CoRefine co-pilot. You help two kinds of users:
 
 What CoRefine holds: measured powder XRD datasets with manifests (list_datasets, get_dataset), agent
 refinement runs on them (list_runs, get_run, query_metrics, read_artifact, compare_runs), DFT sets from
-several codes with equations of state and Raman modes (list_dft_sets, get_dft_set), and tools that put
-the two side by side (theory_vs_experiment, compare_pattern, identify_phase).
+several codes with equations of state and Raman modes (list_dft_sets, get_dft_set), and tools that
+compare a measured pattern with a model structure (compare_pattern, identify_phase).
 
 Rules:
 - Answer from tool results, not memory. Fetch before you answer.
 - Every number you state must appear in a tool result from this turn, copied with the same or
-  fewer decimals. Do not compute new numbers. If you need a comparison, call compare_runs,
-  theory_vs_experiment or compare_pattern.
+  fewer decimals. Do not compute new numbers. If you need a comparison, call compare_runs
+  or compare_pattern.
 - For metadata, licence or reproducibility questions call check_dataset_metadata and report each
   check as found or missing; do not declare a dataset "FAIR" or not, list what is and is not there.
 - Say plainly what CoRefine cannot answer: it has no ARPES or band-structure comparison, no surface
@@ -195,12 +195,12 @@ def check_dataset_metadata(dataset_id: str) -> str:
 def list_dft_sets(material: str | None = None) -> str:
     """DFT input sets, newest first: id, formula, functional, k-mesh, codes, whether input checks passed.
     material: a formula such as Si or ZnO to filter by."""
-    from app.api.bridge import _same
     from app.api.dft import list_jobs
+    from app.dft.materials import same_material
 
     rows = list_jobs()
     if material:
-        rows = [r for r in rows if _same(r["formula"], material)]
+        rows = [r for r in rows if same_material(r["formula"], material)]
     return _clip(rows[:30])
 
 
@@ -230,16 +230,6 @@ def get_dft_set(set_id: str) -> str:
                   "failed_checks": [r for r in checks_.get("results", []) if not r.get("ok")],
                   "runs": job.get("runs"), "summary": job.get("summary"), "studies": studies,
                   "n_files": len(job.get("files", []))})
-
-
-@tool
-def theory_vs_experiment(material: str) -> str:
-    """For one material (formula, e.g. Si): refined lattice parameters from XRD runs, certified values from
-    dataset manifests, DFT a0 and B0 per code and functional with the percentage difference to experiment
-    and the pressure equivalent, and Raman-active modes."""
-    from app.api.bridge import bridge
-
-    return _clip(bridge(material))
 
 
 @tool
@@ -291,7 +281,7 @@ def start_run(prompt: str, dataset_ids: list[str], parent_run_id: str | None = N
 
 
 TOOLS = [list_runs, get_run, query_metrics, read_artifact, search_knowledge, compare_runs, list_datasets, get_dataset,
-         check_dataset_metadata, list_dft_sets, get_dft_set, theory_vs_experiment, compare_pattern, identify_phase,
+         check_dataset_metadata, list_dft_sets, get_dft_set, compare_pattern, identify_phase,
          start_run]
 
 

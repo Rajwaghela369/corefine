@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import bridge, chat, datasets, dft, health, runs, xrd
+from app.api import chat, datasets, dft, health, runs, xrd
 from app.config import get_settings
 from app.models.db import init_db
 
@@ -23,5 +23,5 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="CoRefine", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[get_settings().FRONTEND_ORIGIN], allow_methods=["*"],
                    allow_headers=["*"])
-for r in (health.router, datasets.router, runs.router, chat.router, dft.router, xrd.router, bridge.router):
+for r in (health.router, datasets.router, runs.router, chat.router, dft.router, xrd.router):
     app.include_router(r)

@@ -194,7 +194,7 @@ const TOOLS: Record<string, string> = {
   list_datasets: "your datasets", get_dataset: "a dataset", check_dataset_metadata: "dataset documentation",
   list_runs: "past analyses", get_run: "an analysis", query_metrics: "measured values", compare_runs: "two analyses",
   read_artifact: "a result file", search_knowledge: "earlier reports and notes", start_run: "a new analysis",
-  list_dft_sets: "simulations", get_dft_set: "a simulation", theory_vs_experiment: "theory vs experiment",
+  list_dft_sets: "simulations", get_dft_set: "a simulation",
   compare_pattern: "a pattern comparison", identify_phase: "phase identification",
 };
 export const toolLabel = (name: string) => TOOLS[name] ?? name.replaceAll("_", " ");

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Atom, Bot, Database, FlaskConical, GitCompareArrows, type LucideIcon } from "lucide-react";
+import { Atom, Bot, Database, FlaskConical, type LucideIcon } from "lucide-react";
 import { api } from "../api/client";
 import { runTitle } from "../components/labels";
 import { Status, clock } from "../components/ui";
@@ -11,8 +11,6 @@ const TASKS: { view: View; icon: LucideIcon; title: string; text: string }[] = [
     text: "Get a lattice parameter from an X-ray diffraction scan, checked against a certified value." },
   { view: "simulate", icon: Atom, title: "Simulate a material",
     text: "Calculate a material's electronic structure (DFT) with several programs and compare what they predict." },
-  { view: "compare", icon: GitCompareArrows, title: "Compare theory and experiment",
-    text: "See side by side how the measurement and the simulations reached their answers for one material." },
   { view: "data", icon: Database, title: "Manage your data",
     text: "Look at scans and structures, add new files, and check that each dataset is well documented." },
 ];

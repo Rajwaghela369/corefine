@@ -72,7 +72,6 @@ def test_prepare_reads_the_scan_and_the_manifest_facts(lab6, tmp_path):
 def test_engine_group_runs_compare_and_tell_their_story(lab6, fake_engines):
     from fastapi.testclient import TestClient
 
-    from app.api.bridge import story
     from app.main import app
 
     c = TestClient(app)
@@ -95,9 +94,9 @@ def test_engine_group_runs_compare_and_tell_their_story(lab6, fake_engines):
     assert [x["engine"] for x in g["runs"]] == ["gsas2", "maud"]
     assert "curve" in g["runs"][0] and "curve" not in g["runs"][1]
     assert g["runs"][1]["reflections"] and g["certified"]["a_A"] == 4.156826
-    st = story("LaB6")
-    assert len(st["experiment"]) == 2 and st["experiment"][0]["steps"][1]["name"].startswith("refine_")
-    assert any(e["agent"] in ("gsas2", "maud") for e in st["experiment"][0]["log"])
+    st = g["runs"][0]["story"]
+    assert st["steps"][1]["name"].startswith("refine_") and st["stages"]
+    assert any(e["agent"] in ("gsas2", "maud") for e in st["log"])
 
 
 def test_unavailable_engine_is_refused(lab6):

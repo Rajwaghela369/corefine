@@ -1,14 +1,13 @@
-import { Atom, Database, FlaskConical, GitCompareArrows, History, Home } from "lucide-react";
+import { Atom, Database, FlaskConical, History, Home } from "lucide-react";
 import { cn } from "./ui";
 
-export type View = "home" | "data" | "analyse" | "simulate" | "compare" | "history";
+export type View = "home" | "data" | "analyse" | "simulate" | "history";
 
 export const VIEWS: { id: View; label: string; title: string; icon: typeof Database; hint: string }[] = [
   { id: "home", label: "Home", title: "Home", icon: Home, hint: "Start here" },
   { id: "data", label: "Data", title: "Your data", icon: Database, hint: "Scans, structures, uploads and documentation" },
   { id: "analyse", label: "Analyse", title: "Analyse a measured scan", icon: FlaskConical, hint: "Analyse an X-ray diffraction scan (experiment)" },
   { id: "simulate", label: "Simulate", title: "Simulate a material", icon: Atom, hint: "Calculate a material's properties (DFT theory)" },
-  { id: "compare", label: "Compare", title: "Theory vs experiment", icon: GitCompareArrows, hint: "Measurement and simulation side by side" },
   { id: "history", label: "History", title: "All analyses", icon: History, hint: "Every analysis you have run" },
 ];
 

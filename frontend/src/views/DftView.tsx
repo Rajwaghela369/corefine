@@ -40,7 +40,7 @@ function DftWelcome({ onOpen }: { onOpen: (id: string) => void }) {
       steps={[
         { icon: Search, title: "Pick a material", text: "Search by formula or elements on the left; the stable phase is listed first." },
         { icon: Play, title: "Plan and run", text: "The plan and its reasons are shown, inputs are checked, and installed codes run one after another." },
-        { icon: Sigma, title: "Read the results", text: "Band gap and convergence per code, next to Materials Project; Theory ↔ Experiment shows how it went." },
+        { icon: Sigma, title: "Read the results", text: "Band gap and convergence per code, next to Materials Project." },
       ]}>
       <WelcomeSection title={`Programs ready to use (${(cfg.data?.codes ?? []).filter((c) => c.available).length})`}>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -230,10 +230,8 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
 }
 
 function MaterialSearch({ picked, onPick }: { picked: MpMaterial | null; onPick: (m: MpMaterial) => void }) {
-  // arriving from Theory vs experiment with a material already chosen starts the search for it
-  const initial = new URLSearchParams(window.location.search).get("material") ?? "";
-  const [q, setQ] = useState(initial);
-  const [query, setQuery] = useState(initial);
+  const [q, setQ] = useState("");
+  const [query, setQuery] = useState("");
   const res = useQuery({ queryKey: ["mp-search", query], queryFn: () => dft.searchMaterials(query), enabled: !!query });
   return (
     <div>
