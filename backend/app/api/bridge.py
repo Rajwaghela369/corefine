@@ -121,6 +121,32 @@ def _conventional(cell: dict) -> dict:
     return {}
 
 
+def run_story(db, store, r: RunRow) -> dict:
+    """One analysis run as a sequence of reasoning steps: plan, each step with its goal, attempts and errors, the
+    notes every agent or program logged, and the result compared with the certificate. Read from the run's records."""
+    ms = {m.name: {"value": m.value, "uncertainty": m.uncertainty, "unit": m.unit}
+          for m in db.scalars(select(MetricRow).where(MetricRow.run_id == r.id))}
+    steps = [{"idx": s.idx, "name": s.name, "status": s.status, "attempts": s.attempts, "error": s.error}
+             for s in db.scalars(select(StepRow).where(StepRow.run_id == r.id).order_by(StepRow.idx))]
+    goals = {st["idx"]: st.get("goal") for st in ((r.plan or {}).get("steps") or [])}
+    for s in steps:
+        s["goal"] = goals.get(s["idx"])
+    engine_result = {}
+    key = f"runs/{r.id}/outputs/result.json"
+    if store.exists(key):
+        res = json.loads(store.get(key))
+        engine_result = {"stages": res.get("stages"), "settings": res.get("settings"), "warnings": res.get("warnings")}
+    return {
+        "run": r.id, "engine": r.engine or "agents", "status": r.status, "prompt": r.prompt,
+        "datasets": r.dataset_ids, "group_id": r.group_id, "error": r.error,
+        "plan_title": (r.plan or {}).get("title"), "plan_summary": (r.plan or {}).get("summary"),
+        "steps": steps, "log": _log_entries(store, r.id), "classification": r.classification,
+        "claim": {k: (r.claim_check or {}).get(k) for k in ("passed", "checked")} if r.claim_check else None,
+        "result": {k: ms[k] for k in ("a_refined", "c_refined", "a_certified", "c_certified", "difference_from_certified",
+                                      "c_difference_from_certified", "Rwp") if k in ms},
+        **engine_result}
+
+
 @router.get("/story")
 def story(material: str, limit: int = 3):
     """For one material: what the experiment runs and the DFT sets did, step by step, with the reasons recorded at
@@ -130,25 +156,9 @@ def story(material: str, limit: int = 3):
 
     store = get_store()
     measured = [r.id for r in datasets.list_indexed() if r.role == "measured_pattern" and _same(r.material, material)]
-    experiment = []
     with get_sessionmaker()() as db:
         runs = [r for r in db.scalars(select(RunRow).order_by(RunRow.id.desc())) if set(r.dataset_ids or []) & set(measured)]
-        for r in runs[:limit]:
-            ms = {m.name: {"value": m.value, "uncertainty": m.uncertainty, "unit": m.unit}
-                  for m in db.scalars(select(MetricRow).where(MetricRow.run_id == r.id))}
-            steps = [{"idx": s.idx, "name": s.name, "status": s.status, "attempts": s.attempts, "error": s.error}
-                     for s in db.scalars(select(StepRow).where(StepRow.run_id == r.id).order_by(StepRow.idx))]
-            goals = {st["idx"]: st.get("goal") for st in ((r.plan or {}).get("steps") or [])}
-            for s in steps:
-                s["goal"] = goals.get(s["idx"])
-            experiment.append({
-                "run": r.id, "engine": r.engine or "agents", "status": r.status, "prompt": r.prompt,
-                "datasets": r.dataset_ids, "group_id": r.group_id, "error": r.error,
-                "plan_title": (r.plan or {}).get("title"), "plan_summary": (r.plan or {}).get("summary"),
-                "steps": steps, "log": _log_entries(store, r.id), "classification": r.classification,
-                "claim": {k: (r.claim_check or {}).get(k) for k in ("passed", "checked")} if r.claim_check else None,
-                "result": {k: ms[k] for k in ("a_refined", "c_refined", "a_certified", "c_certified", "difference_from_certified",
-                                              "c_difference_from_certified", "Rwp") if k in ms}})
+        experiment = [run_story(db, store, r) for r in runs[:limit]]
     theory = []
     for d in sorted(jobs_dir().glob("dft-*"), reverse=True):
         try:

@@ -61,6 +61,68 @@ def read(set_dir: Path) -> dict:
         p = set_dir / "studies" / kind / "study.json"
         if p.is_file():
             out[kind] = json.loads(p.read_text())
+    if "convergence" in out:
+        out["convergence"]["reasoning"] = explain_convergence(out["convergence"])
+    return out
+
+
+def _label(series: str, p: dict) -> str:
+    return "×".join(map(str, p["kmesh"])) if series == "kpoints" else f"×{p['basis_scale']}"
+
+
+def _explain_series(series: str, pts: list[dict], tol: float, chosen) -> dict:
+    """Each point with its energy and its distance from the most accurate point, and the decision with its reason."""
+    ref = pts[-1].get("e_per_atom_eV") if pts and pts[-1].get("ok") else None
+    rows = []
+    for i, p in enumerate(pts):
+        d = abs(p["e_per_atom_eV"] - ref) * 1000 if ref is not None and p.get("ok") else None
+        prev = next((q for q in reversed(pts[:i]) if q.get("ok")), None)
+        step = abs(p["e_per_atom_eV"] - prev["e_per_atom_eV"]) * 1000 if prev and p.get("ok") else None
+        rows.append({"setting": _label(series, p), "ok": bool(p.get("ok")), "e_per_atom_eV": p.get("e_per_atom_eV"),
+                     "delta_to_most_accurate_meV": d, "change_from_previous_meV": step, "within": d is not None and d <= tol,
+                     "scf_iterations": p.get("scf_iterations"), "error": p.get("error"), "healed": p.get("healed"),
+                     "is_reference": i == len(pts) - 1})
+    what = "k-mesh" if series == "kpoints" else "basis size"
+    if ref is None:
+        verdict = (f"The most accurate {what} did not finish, so nothing can be judged against it." if pts
+                   else "Not run yet.")
+    elif chosen is None:
+        verdict = (f"Not shown within this series: no {what} before the most accurate one stays within {tol} meV/atom of it "
+                   f"together with every denser one. The most accurate {what} is used, and a denser one would be needed to confirm it.")
+    else:
+        k = next(i for i, r in enumerate(rows) if r["setting"] == chosen)
+        worst = max((r["delta_to_most_accurate_meV"] for r in rows[k:-1] if r["delta_to_most_accurate_meV"] is not None), default=0.0)
+        before = rows[k - 1] if k > 0 else None
+        verdict = (f"{chosen} is the cheapest {what} from which every more accurate one stays within {tol} meV/atom of the "
+                   f"most accurate ({rows[-1]['setting']}); the largest difference from there on is {worst:.3f} meV/atom."
+                   + (f" The one before it ({before['setting']}) is {before['delta_to_most_accurate_meV']:.3f} meV/atom away, "
+                      "outside the tolerance." if before and before["delta_to_most_accurate_meV"] is not None else ""))
+    return {"rows": rows, "verdict": verdict, "chosen": chosen}
+
+
+def explain_convergence(st: dict) -> dict:
+    """Why each code's settings were chosen, step by step, reconstructed from the stored points with the same rule the
+    study applied (converged_index). Works for studies run before this explanation existed."""
+    tol = st.get("tol_meV_per_atom", TOL_MEV)
+    meshes = ", ".join("×".join(map(str, m)) for m in st.get("kmeshes", []))
+    scales = ", ".join(f"×{b}" for b in st.get("basis_scales", BASIS_SCALES))
+    out = {"criterion": f"A setting counts as converged when it and every more accurate setting after it are within {tol} meV/atom "
+                        "of the most accurate point. The most accurate point only serves as the reference: it cannot confirm itself.",
+           "plan": (f"First the k-mesh, with the basis at each code's default: meshes from k-point spacings "
+                    f"{', '.join(map(str, KSPACINGS))} Å⁻¹ on this cell ({meshes}). "
+                    f"Then the basis, at the k-mesh just chosen: {scales} of each "
+                    "code's default cutoff. Energies are per atom, so codes and cells compare."),
+           "codes": {}}
+    for code, e in (st.get("codes") or {}).items():
+        k = _explain_series("kpoints", e.get("kpoints") or [], tol,
+                            "×".join(map(str, e["converged_kmesh"])) if e.get("converged_kmesh") else None)
+        b = _explain_series("basis", e.get("basis") or [], tol,
+                            f"×{e['converged_basis_scale']}" if e.get("converged_basis_scale") is not None else None)
+        kuse = k["chosen"] or (k["rows"][-1]["setting"] + " (most accurate; not confirmed)" if k["rows"] else "—")
+        buse = b["chosen"] or (b["rows"][-1]["setting"] + " (most accurate; not confirmed)" if b["rows"] else "—")
+        out["codes"][code] = {"kpoints": k, "basis": b, "basis_parameter": e.get("basis_parameter") or BASIS_NOTES.get(code),
+                              "use": f"k-mesh {kuse}, basis {buse}",
+                              "done": bool(e.get("kpoints")) and len(e.get("basis") or []) == len(st.get("basis_scales") or BASIS_SCALES)}
     return out
 
 
@@ -115,10 +177,18 @@ def convergence(set_dir: Path, codes: list[str] | None = None) -> dict:
           kmeshes=[list(m) for m in meshes], basis_scales=list(BASIS_SCALES), codes={})
     for code in codes:
         kpts = []
+
+        def partial(**entry):  # every finished point is visible while the study runs
+            st = _state(d)
+            st["codes"][code] = {"kpoints": kpts, "basis": [], "converged_kmesh": None, "converged_basis_scale": None,
+                                 "basis_parameter": BASIS_NOTES.get(code, "energy cutoff"), **entry}
+            _save(d, codes=st["codes"])
+
         for m in meshes:
-            _save(d, message=f"{code}: k-mesh {m}")
+            _save(d, message=f"{code}: k-mesh {'×'.join(map(str, m))}")
             pt = _point(d / code / f"k_{'x'.join(map(str, m))}", base.model_copy(update={"kmesh": m}), code)
             kpts.append({"kmesh": list(m), **pt})
+            partial()
         ik = converged_index([p.get("e_per_atom_eV") for p in kpts])
         k_conv = tuple(kpts[ik]["kmesh"]) if ik is not None else tuple(meshes[-1])  # densest if not demonstrated
         basis = []
@@ -126,6 +196,7 @@ def convergence(set_dir: Path, codes: list[str] | None = None) -> dict:
             _save(d, message=f"{code}: basis x{bs}")
             pt = _point(d / code / f"b_{bs}", base.model_copy(update={"kmesh": k_conv, "basis_scale": bs}), code)
             basis.append({"basis_scale": bs, **pt})
+            partial(basis=basis, converged_kmesh=list(k_conv) if ik is not None else None)
         ib = converged_index([p.get("e_per_atom_eV") for p in basis])
         st = _state(d)
         st["codes"][code] = {"kpoints": kpts, "basis": basis, "converged_kmesh": list(k_conv) if ik is not None else None,

@@ -16,11 +16,13 @@ const SOURCE_TABS: { id: SourceKind; label: string }[] = [
 ];
 
 export function DftView({ jobId, setJobId }: { jobId: string | null; setJobId: (id: string | null) => void }) {
+  // a ?study= link opens that tab once; read it before the address bar is rewritten
+  const [study] = useState(() => new URLSearchParams(window.location.search).get("study") ?? undefined);
   return (
     <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
       <div className="min-h-0 border-r border-line"><DftForm onCreated={setJobId} selected={jobId} onSelect={setJobId} /></div>
       <div className="flex min-h-0 flex-col">
-        {jobId ? <JobWorkspace id={jobId} onClose={() => setJobId(null)} /> : <DftWelcome onOpen={setJobId} />}
+        {jobId ? <JobWorkspace id={jobId} study={study} onClose={() => setJobId(null)} /> : <DftWelcome onOpen={setJobId} />}
       </div>
     </div>
   );
@@ -356,7 +358,7 @@ function JobList({ selected, onSelect }: { selected: string | null; onSelect: (i
   );
 }
 
-function JobWorkspace({ id, onClose }: { id: string; onClose: () => void }) {
+function JobWorkspace({ id, study, onClose }: { id: string; study?: string; onClose: () => void }) {
   const q = useQuery({ queryKey: ["dft-job", id], queryFn: () => dft.job(id),
     refetchInterval: (query) => livePollInterval(query.state.data) ||
       (studiesLive(query.state.data) ? 3000 : false) });
@@ -386,7 +388,7 @@ function JobWorkspace({ id, onClose }: { id: string; onClose: () => void }) {
           <Cellv label="Nearest neighbour" value={`${num(p.cell.nearest_neighbour_A)} Å`} mono />
         </div>
       </div>
-      <Sections key={id} initial={new URLSearchParams(window.location.search).get("study") ?? undefined} sections={[
+      <Sections key={id} initial={study} sections={[
         { key: "overview", label: "Overview", icon: LayoutDashboard, body: <DftOverview job={job} /> },
         { key: "structure", label: "Structure & plan", icon: Atom, body: <StructurePane job={job} /> },
         { key: "checks", label: "Checks", icon: ShieldCheck, body: <ChecksPane job={job} />,

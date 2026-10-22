@@ -82,3 +82,23 @@ def test_save_computed_structure_into_storage(seeded, tmp_path):
     atoms = patterns.atoms_from_dataset(m.id)
     assert atoms.get_volume() / len(atoms) == pytest.approx(20.4542, rel=1e-4)
     assert m.id in [n.id for n in datasets.tree() if n.valid]
+
+
+def test_convergence_explanation_follows_the_rule():
+    from app.dft.studies import explain_convergence
+
+    def pts(key, vals, es):
+        return [{key: v, "ok": True, "e_per_atom_eV": e, "scf_iterations": 8} for v, e in zip(vals, es)]
+
+    st = {"tol_meV_per_atom": 1.0, "kmeshes": [[4, 4, 4], [6, 6, 6], [8, 8, 8]], "basis_scales": [1.0, 1.5, 2.0],
+          "codes": {"espresso": {"kpoints": pts("kmesh", [[4, 4, 4], [6, 6, 6], [8, 8, 8]], [-10.0, -10.0102, -10.0105]),
+                                 "basis": pts("basis_scale", [1.0, 1.5, 2.0], [-10.0, -10.02, -10.04]),
+                                 "converged_kmesh": [6, 6, 6], "converged_basis_scale": None}}}
+    r = explain_convergence(st)["codes"]["espresso"]
+    assert r["kpoints"]["chosen"] == "6×6×6" and "cheapest k-mesh" in r["kpoints"]["verdict"]
+    assert "4×4×4" in r["kpoints"]["verdict"] and "outside the tolerance" in r["kpoints"]["verdict"]
+    rows = r["kpoints"]["rows"]
+    assert rows[1]["within"] and not rows[0]["within"] and rows[2]["is_reference"]
+    assert abs(rows[1]["delta_to_most_accurate_meV"] - 0.3) < 1e-6
+    assert r["basis"]["chosen"] is None and "Not shown within this series" in r["basis"]["verdict"]
+    assert r["use"] == "k-mesh 6×6×6, basis ×2.0 (most accurate; not confirmed)" and r["done"]

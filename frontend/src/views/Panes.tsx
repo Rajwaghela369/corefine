@@ -1,15 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { Code2, Download, ExternalLink } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, xrd, type Metric, type RunDetail, type Step } from "../api/client";
+import { api, xrd, type Metric, type RunDetail } from "../api/client";
 import { ClaimBadge } from "../components/ClaimBadge";
 import { formatUncertainty, formatValue, friendlyError, isKeyMetric, metricHelp, metricLabel, unitLabel } from "../components/labels";
 import { useDetailed } from "../components/prefs";
 import { type Overlay, XrdChart } from "../components/XrdChart";
-import { Button, Dialog, Empty, Status, Tag, cn, num } from "../components/ui";
-import { Legend, Node } from "./BridgeView";
+import { Button, Empty, cn, num } from "../components/ui";
 
 const latest = (run: RunDetail, ext: string) => {
   // per-step copies live in outputs/step_NN/; show the latest copy of each file name
@@ -20,93 +19,6 @@ const latest = (run: RunDetail, ext: string) => {
 };
 
 const pretty = (name: string) => name.replaceAll("_", " ").replace(/^\w/, (c) => c.toUpperCase());
-
-// --- Steps -----------------------------------------------------------------
-
-/** What happened, top to bottom: who did each step (AI, code, sandbox) and how it went. */
-export function StepsPane({ run, logOpen, onLogClose }: { run: RunDetail; logOpen: boolean; onLogClose: () => void }) {
-  const detailed = useDetailed();
-  const [sel, setSel] = useState<number | null>(null);
-  const steps = run.plan?.steps ?? [];
-  const status = new Map(run.steps.map((s) => [s.idx, s]));
-  const agents = (run.engine ?? "agents") === "agents";
-  if (!run.plan) return run.status === "failed"
-    ? <Empty title="The analysis stopped before a plan was made">{friendlyError(run.error).title}</Empty>
-    : <Empty title="Planning…">The AI is reading your question and the dataset descriptions.</Empty>;
-  const step = steps.find((s) => s.idx === sel);
-  const done = run.status === "done";
-  return (
-    <div className="h-full overflow-auto px-5 py-4">
-      <div className="mb-4"><Legend /></div>
-      <Node actor="input" who="your data" title="Data used">
-        <div className={cn(detailed && "font-mono text-[11.5px]")}>{run.dataset_ids.join(" · ")}</div>
-        <div className="text-[11.5px] text-muted">The certified value is kept hidden from the AI that writes the analysis code.</div>
-      </Node>
-      <Node actor={agents ? "llm" : "code"} who={agents ? "AI planner" : "fixed recipe"} title={run.plan.title}>
-        {run.plan.summary}
-      </Node>
-      {steps.map((s) => {
-        const st = status.get(s.idx);
-        return (
-          <Node key={s.idx} actor={agents ? "llm" : s.name.startsWith("refine") ? "program" : "code"}
-            who={agents ? "AI writes code → runs in a sandbox" : "code"} title={`${s.idx}. ${pretty(s.name)}`} status={st?.status ?? "pending"}>
-            <div>{s.goal}</div>
-            {st && st.attempts > 1 && <Tag tone="warn">{st.status === "done" ? `Fixed itself: the code failed and was rewritten (${st.attempts} attempts)`
-              : `${st.attempts} attempts`}</Tag>}
-            {st?.error && st.status !== "done" && <div className="line-clamp-3 text-[11.5px] text-bad">{st.error.split("\n")[0]}</div>}
-            {(detailed || st?.error) && st?.code_key && <button onClick={() => setSel(s.idx)}
-              className="inline-flex items-center gap-1 text-[11.5px] text-accent hover:underline"><Code2 size={12} /> {detailed ? "Code and log" : "Show what went wrong"}</button>}
-          </Node>
-        );
-      })}
-      <Node actor="code" who="automatic check" title="Compared with the certificate" status={done ? "done" : run.status === "failed" ? "pending" : undefined}>
-        Plain code, not the AI, compares the result with the certified value and the success target.
-      </Node>
-      <Node actor={agents ? "llm" : "code"} who={agents ? "AI analyst + number check" : "report · code"} title="Report" last
-        status={run.claim_check ? (run.claim_check.passed ? "done" : "failed") : undefined}>
-        {run.claim_check ? <ClaimBadge c={run.claim_check} /> : <span className="text-muted">Written after the last step.</span>}
-      </Node>
-      <Dialog title={step ? `Step ${step.idx} · ${pretty(step.name)}` : ""} open={!!step} onClose={() => setSel(null)} wide>
-        {step && <StepDetail runId={run.id} goal={step.goal} outputs={step.outputs} skill={step.skill} st={status.get(step.idx)} />}
-      </Dialog>
-      <Dialog title="Experiment log" open={logOpen} onClose={onLogClose} wide>
-        <FileText runId={run.id} path="experiment_log.md" markdown />
-      </Dialog>
-    </div>
-  );
-}
-
-function StepDetail({ runId, goal, outputs, skill, st }: { runId: string; goal: string; outputs: string[]; skill: string; st?: Step }) {
-  const files = [
-    st?.code_key && { label: "Code", path: st.code_key },
-    st?.stdout_key && { label: "Output log", path: st.stdout_key },
-    st?.stdout_key && { label: "Error log", path: st.stdout_key.replace(/\.stdout$/, ".stderr") },
-  ].filter(Boolean) as { label: string; path: string }[];
-  const [tab, setTab] = useState(0);
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-3">{st && <Status status={st.status} />}
-        {st && st.attempts > 1 && <Tag tone="warn">{st.attempts} attempts</Tag>}<span className="text-xs text-muted">skill: {skill}</span></div>
-      <p className="text-[13px] text-ink-2">{goal}</p>
-      <p className="text-xs text-muted">Files it had to produce: <span className="font-mono">{outputs.join(", ")}</span></p>
-      {st?.error && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-bad/20 bg-bad-soft p-2.5 font-mono text-[11px] text-bad">{st.error}</pre>}
-      {files.length > 0 && <>
-        <div className="flex gap-1 border-b border-line">
-          {files.map((f, i) => <button key={f.label} onClick={() => setTab(i)}
-            className={cn("-mb-px border-b-2 px-2.5 py-1.5 text-xs", tab === i ? "border-accent font-medium text-ink" : "border-transparent text-muted hover:text-ink")}>{f.label}</button>)}
-          <span className="ml-auto self-center font-mono text-[10.5px] text-faint">{files[tab]?.path}</span>
-        </div>
-        <FileText runId={runId} path={files[tab].path} />
-      </>}
-    </div>
-  );
-}
-
-function FileText({ runId, path, markdown }: { runId: string; path: string; markdown?: boolean }) {
-  const q = useQuery({ queryKey: ["file", runId, path], queryFn: () => api.artifactText(runId, path) });
-  if (markdown) return <div className="doc max-h-[60vh] overflow-auto"><Markdown remarkPlugins={[remarkGfm]}>{q.data ?? ""}</Markdown></div>;
-  return <pre className="max-h-[55vh] overflow-auto rounded-md border border-line bg-subtle p-3 font-mono text-[11px] leading-4">{q.data || "(empty)"}</pre>;
-}
 
 // --- Plots -----------------------------------------------------------------
 

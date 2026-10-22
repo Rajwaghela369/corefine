@@ -12,6 +12,8 @@ import logging
 import math
 import traceback
 
+import numpy as np
+
 from app.agents import checks
 from app.config import get_settings
 from app.models.contracts import Metric, Plan, PlanStep, RunRequest
@@ -39,6 +41,52 @@ def _plan(engine: str, measured: str, reference: str) -> Plan:
                        PlanStep(idx=3, name="compare", dataset_ids=[measured], uses_previous_outputs=["result.json"],
                                 outputs=["comparison.json"], skill="engine",
                                 goal="Compare the refined lattice parameters with the certified values (code).")])
+
+
+# Why each refinement stage comes where it does (shown in the reasoning trail)
+STAGE_WHY = {
+    "gsas2": {
+        "background and scale": "Fit the smooth background (Chebyshev, 6 terms) and the overall scale first, so that later "
+                                "parameters are not used to soak them up.",
+        "cell and displacement": "Now the lattice: peak positions depend on the cell and, for a flat lab specimen, on how far "
+                                 "it sits off the focusing circle (displacement).",
+        "instrument profile": "Peak shape from the optics (U, V, W widths and SH/L asymmetry), so positions are fitted with "
+                              "the right line shape.",
+        "size and microstrain": "Whatever Lorentzian broadening remains is the sample's: crystallite size and microstrain.",
+    },
+    "maud": {
+        "background and scale": "MAUD wizard 0: background polynomial and scale only, from MAUD's default starting model.",
+        "cell and basic parameters": "MAUD wizard 1: adds the cell, the 2θ offset and the basic phase parameters.",
+        "microstructure": "MAUD wizard 2: adds crystallite size and microstrain.",
+    },
+}
+
+
+def _input_reasoning(pr: engines.Prepared, measured, reference: str, engine: str) -> list[str]:
+    """The decisions taken before any fitting, each with the reason, in the order they were taken."""
+    data = np.loadtxt(pr.scan)
+    inst = measured.instrument
+    out = [f"Read {pr.measured_file}: {len(data)} points, 2θ {data[0, 0]:.2f}–{data[-1, 0]:.2f}°. Only the measured block is "
+           "used; the certified cell and the provider's own fit were stripped first, so the refinement cannot copy them.",
+           "Uncertainties: " + "; ".join(pr.notes) + ", so each point is weighted by how well it was counted.",
+           f"Wavelength {pr.wavelength_A} Å, taken from {inst.wavelength_source}; it is never assumed."]
+    if pr.ka2:
+        out.append("Kα2 is present (no incident-beam monochromator), so every peak is modelled as a Kα1/Kα2 doublet; "
+                   "the Kα2 line and its intensity ratio come from each program's own defaults, which the certificate does not give.")
+    else:
+        out.append("Single wavelength (monochromator or synchrotron), so each reflection is a single peak.")
+    if engine == "maud":
+        out.append("Geometry: MAUD's default analysis (" + ("no geometry corrections, for synchrotron data" if pr.source == "synchrotron"
+                   else "Bragg-Brentano") + "); its wizard refines a 2θ offset itself, which is MAUD's own choice of parameters.")
+    elif pr.source == "lab":
+        out.append("Lab Bragg-Brentano geometry: the specimen displacement is refined; the zero offset is kept fixed because "
+                   "the 2θ scale in the file is already calibrated by the provider, and the two are strongly correlated.")
+    else:
+        out.append("Synchrotron (Debye-Scherrer) geometry: no displacement term; the 2θ scale was already corrected by the "
+                   "provider against a standard, so the zero offset is fixed too.")
+    out.append(f"Reference structure {reference}: it gives the space group, atom positions and starting cell; only the "
+               "cell, profile and microstructure are refined from it.")
+    return out
 
 
 def _metrics(r: dict, pr: engines.Prepared, manifest) -> list[Metric]:
@@ -122,14 +170,18 @@ def execute_engine_run(run_id: str, req: RunRequest) -> None:
         workdir = s.LOCAL_DATA_DIR / "engine_runs" / run_id
         pr = engines.prepare(measured.id, reference, workdir)
         rec.put("outputs/scan.xye", pr.scan.read_bytes(), 1)
-        rec.log("inputs", f"{pr.measured_file}: λ = {pr.wavelength_A} Å ({'Kα1 + Kα2' if pr.ka2 else 'single line'}, "
-                          f"{pr.source}); " + "; ".join(pr.notes))
+        for why in _input_reasoning(pr, measured, reference, engine):
+            rec.log("reasoning", why)
         rec.step_update(1, status="done")
 
         rec.step_update(2, status="running", attempts=1)
         r = engines.RUNNERS[engine](pr)
+        prev = None
         for st in r["stages"]:
-            rec.log(engine, f"stage {st['stage']}: Rwp {st['Rwp_percent']:.2f} %")
+            why = STAGE_WHY.get(engine, {}).get(st["stage"], "")
+            change = f"Rwp {prev:.1f} → {st['Rwp_percent']:.1f} %" if prev is not None else f"Rwp {st['Rwp_percent']:.1f} %"
+            rec.log(engine, f"stage “{st['stage']}”: {why} {change}.".replace("  ", " "))
+            prev = st["Rwp_percent"]
         for w in r["warnings"]:
             rec.log(engine, f"warning: {w}")
         slim = {k: v for k, v in r.items() if k != "curve"}
@@ -152,6 +204,13 @@ def execute_engine_run(run_id: str, req: RunRequest) -> None:
             rec.ingest_metrics(ckey)
         all_metrics = metrics + comparison
         rule_class, reasons = checks.rule_classification(all_metrics, None, pr.wavelength_A)
+        diff = next((m for m in comparison if m.name == "difference_from_certified"), None)
+        if diff is not None:
+            target = next((m.value for m in comparison if m.name == "success_target"), None)
+            rec.log("reasoning", f"Refined a differs from the certified value by {diff.value:+.6f} Å; the target is ±{target} Å, "
+                                 f"so this is {'inside' if abs(diff.value) <= (target or 0) else 'outside'} the target.")
+        else:
+            rec.log("reasoning", "No certified value for this dataset, so the result is reported without a comparison.")
         rec.log("rules", f"classification {rule_class}: " + "; ".join(reasons))
         rec.step_update(3, status="done")
 
@@ -195,16 +254,20 @@ def group_view(group_id: str) -> dict:
     from pymatgen.core import Lattice, Structure
     from sqlalchemy import select
 
+    from app.api.bridge import run_story
     from app.models.db import MetricRow, RunRow, get_sessionmaker
     from app.xrd import patterns
 
+    store = get_store()
     with get_sessionmaker()() as db:
         runs = list(db.scalars(select(RunRow).where(RunRow.group_id == group_id).order_by(RunRow.id)))
+        if not runs and (single := db.get(RunRow, group_id)):  # a run analysed with one engine is a group of one
+            runs = [single]
         metrics = {r.id: {m.name: {"value": m.value, "uncertainty": m.uncertainty, "unit": m.unit}
                           for m in db.scalars(select(MetricRow).where(MetricRow.run_id == r.id))} for r in runs}
+        stories = {r.id: run_story(db, store, r) for r in runs}
     if not runs:
         return {"group_id": group_id, "runs": []}
-    store = get_store()
     measured_id = next((i for i in runs[0].dataset_ids if datasets.load_manifest(i).role == "measured_pattern"), None)
     out = {"group_id": group_id, "dataset": measured_id, "runs": []}
     x, y, wl, file, _ = patterns.measured_full(measured_id)
@@ -216,7 +279,7 @@ def group_view(group_id: str) -> dict:
     for r in runs:
         m = metrics[r.id]
         entry = {"id": r.id, "engine": r.engine or "agents", "label": engines.ENGINES[r.engine or "agents"]["label"],
-                 "status": r.status, "metrics": m, "error": r.error}
+                 "status": r.status, "metrics": m, "error": r.error, "story": stories[r.id]}
         key = f"runs/{r.id}/outputs/fit_curve.json"
         if store.exists(key):
             c = json.loads(store.get(key))
@@ -235,6 +298,11 @@ def group_view(group_id: str) -> dict:
                                      "hkl": " ".join(str(abs(v)) for v in h[0]["hkl"])}
                                     for t, h, i in zip(pat.x, pat.hkls, pat.y) if i >= 0.5]
         out["runs"].append(entry)
-    cert = datasets.load_manifest(measured_id).reference_values or {}
+    mm = datasets.load_manifest(measured_id)
+    inst = mm.instrument.model_dump(exclude_none=True) if mm.instrument else {}
+    out["material"], out["reference"] = mm.material, ref_id
+    out["instrument"] = {k: inst.get(k) for k in ("radiation", "wavelength_A", "wavelength_source", "ka2_present")}
+    out["prompt"] = runs[0].prompt
+    cert = mm.reference_values or {}
     out["certified"] = {k: cert.get(k) for k in ("a_A", "a_uncertainty_A", "c_A", "c_uncertainty_A", "source") if cert.get(k)}
     return out
