@@ -15,6 +15,9 @@ CoRefine puts both in one place:
 One rule runs through both: **language models plan and explain, code produces numbers.** No
 LLM writes an input file, and no number reaches a report unless a file or a database row backs it.
 
+> **New here?** Start with [docs/GUIDE.md](docs/GUIDE.md): the idea in one minute, what each screen is for,
+> a glossary (XRD, DFT, k-mesh, Rwp …) and answers to common questions. No physics background needed.
+
 ---
 
 ## Contents
@@ -25,8 +28,10 @@ LLM writes an input file, and no number reaches a report unless a file or a data
 4. [Your structure against a real scan](#your-structure-against-a-real-scan)
 5. [Where the calculations run](#where-the-calculations-run)
 6. [Configuration](#configuration)
-7. [Tests](#tests)
-8. [Data sources and credits](#data-sources-and-credits)
+7. [Project layout](#project-layout)
+8. [Tests](#tests)
+9. [What it does not do yet](#what-it-does-not-do-yet)
+10. [Data sources and credits](#data-sources-and-credits)
 
 ---
 
@@ -313,6 +318,11 @@ your cluster, can be uploaded and are parsed the same way.
 default cutoff). A setting counts as converged when it is within 1 meV/atom of the most accurate
 point **and a denser point confirms it**. One lucky point is not convergence.
 
+The app shows this as a step flow per code: the plan, the k-mesh series with each point's distance from
+the most accurate one, the decision and the reason for it, then the same for the basis, and finally the
+settings to use. The explanation is rebuilt from the stored points with the study's own rule, so older
+studies show it too, and points appear live while a study is running. The codes sit side by side below.
+
 *The equation-of-state and Raman studies below remain in the backend and API (`/dft/jobs/{id}/studies/…`) but are no longer shown in the UI, which concentrates on runs, band gaps and
 convergence.*
 
@@ -456,10 +466,29 @@ committed.
 
 ---
 
+## Project layout
+
+```
+backend/
+  app/agents/         Planner, Coder, Analyst, claim checker, chat co-pilot
+  app/orchestration/  run graph (LangGraph), engine runs (GSAS-II, MAUD), experiment log
+  app/sandbox/        Daytona and local subprocess runners
+  app/xrd/            peak fitting, model-vs-scan comparison, phase ID, engine wrappers
+  app/dft/            planner, workflow, studies, one adapter per code in codes/, tools.py installer
+  app/storage/        files, database, datasets, code metadata checks (fair.py)
+  app/api/            FastAPI routes
+  skills/             the XRD skill text and the gold analysis
+  scripts/            fetch_data, setup, dft_inputs (command line)
+frontend/src/         React app: views/ (Home, Data, Analyse, Simulate, History, Software), panels/ (new analysis, assistant)
+docs/                 SPEC.md and SPEC_CORRECTIONS.md (what the build found wrong in the spec)
+```
+
+---
+
 ## Tests
 
 ```bash
-cd backend && uv run pytest        # 91 tests; LLM mocked, everything else real
+cd backend && uv run pytest        # 137 tests; LLM mocked, everything else real
 uv run pytest -m integration       # the 3 that call real services (keys needed)
 ```
 
@@ -479,6 +508,31 @@ uv run pytest -m integration       # the 3 that call real services (keys needed)
 - the convergence rule, the EOS fit and the Δ-gauge;
 - Raman selection rules;
 - peak matching, scale fitting and phase identification.
+
+---
+
+## What it does not do yet
+
+- **ARPES and band-structure comparison.** Only band gaps and lattice parameters are compared so far.
+- **Magnetic materials** are refused, not run as non-magnetic. **Surface slabs, supercells and defects** are
+  not modelled.
+- **MAUD** has no calibrated instrument file, so it fits the narrow NIST peaks poorly (see above).
+- **No authentication.** The backend trusts whoever can reach it. Run it on your own machine, and put a
+  password in front of it before exposing it anywhere.
+- **macOS and Windows** are untested; the Linux path is the one that has been run.
+
+---
+
+## Documentation map
+
+| File | For |
+|---|---|
+| [docs/GUIDE.md](docs/GUIDE.md) | newcomers: concepts, glossary, FAQ |
+| this README | every feature, the numbers, set-up and configuration |
+| [docs/SPEC_CORRECTIONS.md](docs/SPEC_CORRECTIONS.md) | what the original plan got wrong, and the design decisions |
+| [docs/SPEC.md](docs/SPEC.md) | the original hackathon plan (historical) |
+| [CLAUDE.md](CLAUDE.md) | notes for AI coding assistants working in the repo |
+| `data/*/README.md` | each dataset: what its files say and do not say |
 
 ---
 

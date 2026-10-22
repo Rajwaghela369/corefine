@@ -1,6 +1,6 @@
 # CoRefine — notes for Claude Code sessions
 
-Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified deviations from the spec).
+Read this file and `docs/SPEC.md` (historical; `Readme.md` and `docs/GUIDE.md` describe what exists now), then `docs/SPEC_CORRECTIONS.md` (verified deviations from the spec).
 
 ## Layout
 - `backend/app/` — `api/` (FastAPI routers), `agents/` (llm client, planner, coder, analyst, copilot,
@@ -10,7 +10,7 @@ Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified dev
 - `backend/skills/` — skill files loaded by name; `examples/gold_analysis.py` is the human-checked
   reference and its outputs are in `examples/gold_outputs/`.
 - `backend/tests/` — pytest; LLM calls mocked, everything else real (local mode).
-- `frontend/src/` — React + Vite + TS: `views/` (Storage, Lab with 2×2 Plan/Plots/Data/Report panes), `panels/`, `components/` (header, sidebar, UI primitives), `api/`.
+- `frontend/src/` — React + Vite + TS: `views/` (Home, Data, Analyse, Simulate, History, Software), `panels/` (new analysis, runs list, assistant), `components/` (header, sidebar, live reasoning, UI primitives), `api/`.
 - `backend/app/dft/` — structure (CIF/COD/Materials Project/storage) → standard cell → inputs for every registered code adapter (`codes/`) → read-back checks. New code = new `CodeAdapter` + one registry line. `execute.py` runs sets on targets from the per-user `compute.yaml` (local or Slurm over SSH) and parses results via the adapter. API `/dft/*`, CLI `scripts/dft_inputs.py`.
 - `data/` — seed dataset manifests and READMEs (raw files come from `backend/scripts/fetch_data.py`).
 

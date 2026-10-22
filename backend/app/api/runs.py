@@ -1,3 +1,5 @@
+"""XRD analysis runs: start one, list them, stream progress (SSE) and fetch their files."""
+
 import asyncio
 import json
 import mimetypes
