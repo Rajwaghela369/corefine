@@ -71,3 +71,40 @@ body {
   .shimmer { animation: none; background: none; color: var(--color-ink); }
   .live-in, .caret { animation: none; }
 }
+
+/* --- landing page: the logo's own palette on near-black ------------------------------------------------- */
+.landing { background: #04050a; color: #fff; }
+.landing-glow {
+  background:
+    radial-gradient(40% 45% at 28% 45%, rgb(255 110 30 / .22), transparent 70%),
+    radial-gradient(30% 40% at 50% 40%, rgb(150 60 255 / .22), transparent 70%),
+    radial-gradient(40% 45% at 72% 48%, rgb(30 170 255 / .22), transparent 70%);
+  animation: landing-breathe 9s ease-in-out infinite alternate;
+}
+.landing-grid {
+  background-image: linear-gradient(rgb(90 160 255 / .07) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(90 160 255 / .07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(60% 55% at 50% 45%, #000 20%, transparent 75%);
+}
+.landing-logo {
+  filter: drop-shadow(0 0 28px rgb(140 80 255 / .35)) drop-shadow(0 0 60px rgb(30 160 255 / .18));
+  animation: landing-in 1.1s cubic-bezier(.2,.8,.2,1) both, landing-float 7s ease-in-out 1.1s infinite;
+}
+.landing-trace { stroke-dasharray: 1; stroke-dashoffset: 1; animation: landing-draw 3.2s ease-out .4s forwards; }
+.landing-enter {
+  background: linear-gradient(90deg, #ff7a1a, #e23ad8, #7b4dff, #22b8ff);
+  box-shadow: 0 0 24px rgb(160 80 255 / .35);
+  animation: landing-in 1s cubic-bezier(.2,.8,.2,1) .5s both;
+  transition: box-shadow .2s;
+}
+.landing-enter:hover { box-shadow: 0 0 36px rgb(160 80 255 / .6), 0 0 60px rgb(30 160 255 / .3); }
+.landing-enter:focus-visible { outline: 2px solid #22b8ff; outline-offset: 4px; }
+@keyframes landing-in { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes landing-float { 50% { transform: translateY(-8px); } }
+@keyframes landing-draw { to { stroke-dashoffset: 0; } }
+@keyframes landing-breathe { to { opacity: .7; transform: scale(1.04); } }
+@media (prefers-reduced-motion: reduce) {
+  .landing-logo, .landing-enter, .landing-glow { animation: none; }
+  .landing-trace { animation: none; stroke-dashoffset: 0; }
+}
