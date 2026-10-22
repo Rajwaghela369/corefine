@@ -1,7 +1,8 @@
 import { Database, FileText, Workflow } from "lucide-react";
 import { useState } from "react";
 import { runTitle } from "../components/labels";
-import { PanelHeader, Status, clock, cn } from "../components/ui";
+import { PanelSwitch, SidePanel, useSidePanel } from "../components/SidePanel";
+import { Status, clock } from "../components/ui";
 import { Welcome, WelcomeSection } from "../components/Welcome";
 import { NewAnalysis } from "../panels/NewAnalysis";
 import { RunsList, useRuns } from "../panels/RunsList";
@@ -16,22 +17,16 @@ export function AnalyseView({ session, runId, setRunId, selected, toggle, onAsk 
   const [panel, setPanel] = useState<"new" | "history">("new");
   // a ?tab= link opens that tab once; read it before the address bar is rewritten
   const [tab] = useState(() => new URLSearchParams(window.location.search).get("tab") ?? undefined);
+  const [collapsed, setCollapsed] = useSidePanel(runId);
   return (
-    <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
-      <div className="flex min-h-0 flex-col border-r border-line bg-surface">
-        <PanelHeader title={panel === "new" ? "New analysis" : "Your analyses"} actions={
-          <div className="flex rounded-md border border-line-strong p-0.5">
-            {(["new", "history"] as const).map((t) => <button key={t} onClick={() => setPanel(t)}
-              className={cn("rounded px-2 py-0.5 text-[11.5px]", panel === t ? "bg-ink font-medium text-white" : "text-muted hover:text-ink")}>
-              {t === "new" ? "New" : "Past analyses"}</button>)}
-          </div>} />
-        <div className="min-h-0 flex-1 overflow-auto">
-          {panel === "new"
-            ? <NewAnalysis session={session} datasets={[...selected]} onToggleDataset={toggle} onStarted={setRunId} />
-            : <RunsList selected={runId} onSelect={setRunId} />}
-        </div>
-      </div>
-      <div className="flex min-h-0 flex-col">
+    <div className="flex h-full min-h-0">
+      <SidePanel title={panel === "new" ? "New analysis" : "Your analyses"} collapsed={collapsed} onCollapse={setCollapsed}
+        actions={<PanelSwitch value={panel} onChange={setPanel} options={[["new", "New"], ["history", "Past analyses"]]} />}>
+        {panel === "new"
+          ? <NewAnalysis session={session} datasets={[...selected]} onToggleDataset={toggle} onStarted={setRunId} />
+          : <RunsList selected={runId} onSelect={setRunId} />}
+      </SidePanel>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {!runId ? <AnalyseWelcome onOpen={setRunId} />
           : <AnalysisWorkspace key={runId} id={runId} tab={tab} onClose={() => setRunId(null)} onAsk={onAsk} />}
       </div>

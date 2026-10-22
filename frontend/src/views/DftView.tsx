@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, X, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, dft, type DftJob, type MpMaterial } from "../api/client";
-import { Button, Empty, Field, PanelHeader, Status, Tag, clock, cn, inputCls, num } from "../components/ui";
+import { Button, Empty, Field, Status, Tag, clock, cn, inputCls, num } from "../components/ui";
 import { RunsPane, livePollInterval, runIsLive } from "./DftRuns";
 import { ConvergencePane } from "./DftStudies";
 import { Dot, Sections } from "../components/Sections";
 import { Atom, FileCode, LayoutDashboard, Play, Search, ShieldCheck, Sigma, TrendingDown } from "lucide-react";
 import { Welcome, WelcomeSection } from "../components/Welcome";
 import { useGo } from "../components/nav";
+import { PanelSwitch, SidePanel, useSidePanel } from "../components/SidePanel";
 
 type SourceKind = "find" | "storage" | "mp" | "cod" | "upload";
 const SOURCE_TABS: { id: SourceKind; label: string }[] = [
@@ -19,10 +20,16 @@ const SOURCE_TABS: { id: SourceKind; label: string }[] = [
 export function DftView({ jobId, setJobId }: { jobId: string | null; setJobId: (id: string | null) => void }) {
   // a ?study= link opens that tab once; read it before the address bar is rewritten
   const [study] = useState(() => new URLSearchParams(window.location.search).get("study") ?? undefined);
+  const [panel, setPanel] = useState<"new" | "sets">("new");
+  const [collapsed, setCollapsed] = useSidePanel(jobId);
+  const jobs = useQuery({ queryKey: ["dft-jobs"], queryFn: dft.jobs });
   return (
-    <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
-      <div className="min-h-0 border-r border-line"><DftForm onCreated={setJobId} selected={jobId} onSelect={setJobId} /></div>
-      <div className="flex min-h-0 flex-col">
+    <div className="flex h-full min-h-0">
+      <SidePanel title={panel === "new" ? "New DFT input set" : "Your sets"} collapsed={collapsed} onCollapse={setCollapsed}
+        actions={<PanelSwitch value={panel} onChange={setPanel} options={[["new", "New"], ["sets", `Your sets${jobs.data ? ` (${jobs.data.length})` : ""}`]]} />}>
+        {panel === "new" ? <DftForm onCreated={setJobId} /> : <JobList selected={jobId} onSelect={setJobId} />}
+      </SidePanel>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {jobId ? <JobWorkspace id={jobId} study={study} onClose={() => setJobId(null)} /> : <DftWelcome onOpen={setJobId} />}
       </div>
     </div>
@@ -81,7 +88,7 @@ function DftWelcome({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) => void; selected: string | null; onSelect: (id: string) => void }) {
+function DftForm({ onCreated }: { onCreated: (id: string) => void }) {
   const qc = useQueryClient();
   const cfg = useQuery({ queryKey: ["dft-config"], queryFn: dft.config });
   const datasets = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
@@ -134,9 +141,8 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
   const toggleCode = (c: string) => setCodes((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]));
 
   return (
-    <div className="flex h-full flex-col bg-surface">
-      <PanelHeader title="New DFT input set" meta="ground state" />
-      <div className="space-y-4 overflow-auto border-b border-line p-4">
+    <div className="bg-surface">
+      <div className="space-y-4 p-4">
         <div>
           <div className="mb-1.5 text-xs font-medium text-ink-2">Structure</div>
           <div className="mb-2 grid grid-cols-5 rounded-md border border-line-strong p-0.5">
@@ -201,7 +207,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
         </div>
         <p className="text-[11px] leading-4 text-muted">Everything else stays at each code's documented defaults; the generated set lists them.</p>
         {kind === "find" ? <>
-          <textarea className={cn(inputCls, "h-12 py-1.5")} value={goal} onChange={(e) => setGoal(e.target.value)}
+          <textarea className={cn(inputCls, "h-16 py-1.5")} value={goal} onChange={(e) => setGoal(e.target.value)}
             placeholder="Goal for the planning agent (optional), e.g. quick check of the band gap" />
           <Button variant="primary" className="w-full" disabled={!picked || !codes.length || wf.isPending} onClick={() => wf.mutate()}>
             {wf.isPending ? "Planning and writing inputs…" : picked ? `Plan and run ${picked.formula} (${picked.id})` : "Pick a material first"}
@@ -224,8 +230,6 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
         </details>
         {error && <div className="rounded-md border border-bad/20 bg-bad-soft p-2.5 text-xs text-bad"><b>Refused.</b> {error}</div>}
       </div>
-      <div className="flex h-9 shrink-0 items-center border-b border-line px-4 text-xs font-medium">Generated sets</div>
-      <div className="min-h-0 flex-1 overflow-auto"><JobList selected={selected} onSelect={onSelect} /></div>
     </div>
   );
 }
@@ -308,8 +312,7 @@ function JobWorkspace({ id, study, onClose }: { id: string; study?: string; onCl
   const failed = job.checks.results.filter((r) => r.ok === false).length;
   const done = job.checks.results.filter((r) => r.ok === true).length;
   const notRun = job.checks.results.filter((r) => r.ok === null).length;
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
+  const header = (
       <div className="border-b border-line bg-surface">
         <div className="flex items-center gap-3 px-5 pb-2 pt-3">
           <h1 className="text-[15px] font-semibold">{p.cell.formula} <span className="font-normal text-muted">· {p.request.functional} ground state · k {p.request.kmesh.join("×")}</span></h1>
@@ -327,7 +330,10 @@ function JobWorkspace({ id, study, onClose }: { id: string; study?: string; onCl
           <Cellv label="Nearest neighbour" value={`${num(p.cell.nearest_neighbour_A)} Å`} mono />
         </div>
       </div>
-      <Sections key={id} initial={study} sections={[
+  );
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Sections key={id} initial={study} header={header} sections={[
         { key: "overview", label: "Overview", icon: LayoutDashboard, body: <DftOverview job={job} /> },
         { key: "structure", label: "Structure & plan", icon: Atom, body: <StructurePane job={job} /> },
         { key: "checks", label: "Checks", icon: ShieldCheck, body: <ChecksPane job={job} />,

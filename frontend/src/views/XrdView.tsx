@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, BrainCircuit, Columns3, FileText, LayoutDashboard, LineChart, Table2, X } from "lucide-react";
+import { Bot, BrainCircuit, ChevronRight, Columns3, FileText, LayoutDashboard, LineChart, Table2, X } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { api, type GroupRun, type GroupView } from "../api/client";
 import { ClaimBadge } from "../components/ClaimBadge";
@@ -42,8 +42,7 @@ export function AnalysisWorkspace({ id, tab, onClose, onAsk }: { id: string; tab
     { key: "data", label: "Values", icon: Table2, body: <PerRun d={d} render={(r) => <DataPane run={r} />} /> },
     { key: "report", label: "Report", icon: FileText, body: <PerRun d={d} render={(r) => <ReportPane run={r} />} /> },
   ];
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
+  const header = (
       <div className="border-b border-line bg-surface">
         <div className="flex items-start gap-3 px-5 pt-3">
           <div className="min-w-0 flex-1">
@@ -62,7 +61,8 @@ export function AnalysisWorkspace({ id, tab, onClose, onAsk }: { id: string; tab
           <button onClick={onClose} title="Close and go back" aria-label="Close"
             className="rounded p-1 text-muted hover:bg-subtle hover:text-ink"><X size={15} /></button>
         </div>
-        <div className="mx-5 mt-3 space-y-2">{d.runs.map((r) => <Verdict key={r.id} id={r.id} label={d.runs.length > 1 ? r.label : null} />)}</div>
+        <div className="mx-5 mt-3 space-y-2">{d.runs.map((r) => <Verdict key={r.id} id={r.id} label={d.runs.length > 1 ? r.label : null}
+          compact={d.runs.length > 1} />)}</div>
         <div className="mt-3 grid grid-cols-4 border-t border-line">
           <Cellv label="Measured scan" value={d.measured?.file ?? "—"} small />
           <Cellv label="Wavelength" value={`${d.instrument?.wavelength_A ?? "—"} Å`} sub={`${[radiationLabel(d.instrument?.radiation), d.instrument?.radiation_source].filter(Boolean).join(", ")}${d.instrument?.ka2_present ? " · Kα1 + Kα2" : ""}`} mono />
@@ -75,7 +75,10 @@ export function AnalysisWorkspace({ id, tab, onClose, onAsk }: { id: string; tab
           </div>
         </div>
       </div>
-      <Sections key={id} initial={tab ?? (anyLive ? "reasoning" : undefined)} sections={sections} />
+  );
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Sections key={id} initial={tab ?? (anyLive ? "reasoning" : undefined)} sections={sections} header={header} />
     </div>
   );
 }
@@ -86,9 +89,11 @@ const BANNER: Record<Tone, string> = {
 };
 
 /** The plain-language answer of one tool's run, built from its own metrics; technical detail folds away. */
-function Verdict({ id, label }: { id: string; label: string | null }) {
+/** compact (several tools side by side): one line per tool, opened for the explanation and the number check. */
+function Verdict({ id, label, compact = false }: { id: string; label: string | null; compact?: boolean }) {
   const run = useQuery({ queryKey: ["run", id], queryFn: () => api.run(id) });
   const [tech, setTech] = useState(false);
+  const [open, setOpen] = useState(!compact);
   const feed = useLiveFeed(run.data && live(run.data.status) ? id : null);
   if (!run.data) return null;
   if (live(run.data.status)) {
@@ -102,8 +107,14 @@ function Verdict({ id, label }: { id: string; label: string | null }) {
   }
   const v = verdict(run.data);
   return (
-    <div className={cn("rounded-lg border px-4 py-2.5", BANNER[v.tone])}>
-      <p className="text-[13.5px] font-semibold leading-6 text-ink">{label && <span className="mr-1.5 text-muted">{label}:</span>}{v.headline}</p>
+    <div className={cn("rounded-lg border px-4", open ? "py-2.5" : "py-1.5", BANNER[v.tone])}>
+      <button onClick={() => setOpen((o) => !o)} disabled={!compact} aria-expanded={open}
+        className="flex w-full items-start gap-1.5 text-left disabled:cursor-default">
+        {compact && <ChevronRight size={14} className={cn("mt-[5px] shrink-0 text-muted transition", open && "rotate-90")} />}
+        <span className={cn("min-w-0 flex-1 text-[13.5px] font-semibold leading-6 text-ink", !open && "truncate")}>
+          {label && <span className="mr-1.5 text-muted">{label}:</span>}{v.headline}</span>
+      </button>
+      {open && <>
       {v.details.map((t) => <p key={t} className="mt-0.5 text-[12.5px] leading-5 text-ink-2">{t}</p>)}
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <ClaimBadge c={run.data.claim_check} />
@@ -111,6 +122,7 @@ function Verdict({ id, label }: { id: string; label: string | null }) {
           {tech ? "Hide" : "Show"} technical details</button>}
       </div>
       {tech && <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-line bg-surface p-2 font-mono text-[11px] text-ink-2">{run.data.error}</pre>}
+      </>}
     </div>
   );
 }
