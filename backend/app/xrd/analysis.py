@@ -121,16 +121,25 @@ def identify(measured: list[dict], candidates: dict[str, list[dict]], wavelength
         if "error" in c:
             continue
         frac = c["n_matched"] / len(strong_peaks)
+        # weak lines count too: a phase that explains the small peaks as well as the big ones is the better candidate
+        call = compare(measured, refl, wavelength)
+        frac_all = call["n_matched"] / len(measured) if "error" not in call else 0.0
         # reflections strong in the model but absent in the scan count against a candidate
         calc = _two_theta(np.array([r["d_A"] for r in refl]) * c["lattice_scale"], wavelength) + c["zero_shift_deg"]
         obs = np.array([p["two_theta"] for p in measured])
         lo, hi = obs.min() - 1, obs.max() + 1
         missing = [r["hkl"] for r, t in zip(refl, calc) if r["intensity"] >= 20 and lo <= t <= hi
                    and np.min(np.abs(obs - t)) > c["tol_deg"]]
+        # a big low-symmetry cell has so many lines that it "explains" any peak by luck: the share of the measured range
+        # lying within the tolerance of one of its lines is the chance that a random peak is matched
+        in_range = calc[(calc >= lo) & (calc <= hi)]
+        chance = float(min(1.0, in_range.size * 2 * c["tol_deg"] / (hi - lo)))
         ranked.append({"candidate": name, "explained_fraction": frac, "n_matched": c["n_matched"], "n_strong": len(strong_peaks),
                        "lattice_scale": c["lattice_scale"], "rms_residual_deg": c["rms_residual_deg"],
                        "strong_model_lines_missing": missing,
-                       "score": frac - 0.1 * len(missing) - 2 * abs(c["lattice_scale"] - 1)})
+                       "chance_match": chance,
+                       "explained_fraction_all_peaks": frac_all,
+                       "score": (frac + 0.5 * frac_all) * (1 - chance) - 0.1 * len(missing) - 2 * abs(c["lattice_scale"] - 1)})
     return sorted(ranked, key=lambda r: r["score"], reverse=True)
 
 

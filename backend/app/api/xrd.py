@@ -149,4 +149,8 @@ def identify(body: IdentifyBody):
     ranked = analysis.identify(peaks, refls, wl)
     for r in ranked:
         r["material"] = info[r["candidate"]]
+        hull = r["material"].get("e_above_hull_eV")
+        if hull:  # a computed phase far above the hull is rarely what a sample contains; rank it lower, and say why
+            r["score"] -= 0.5 * min(float(hull), 1.0)
+    ranked.sort(key=lambda r: r["score"], reverse=True)
     return {"file": file, "formula": body.formula or m.material, "n_peaks": len(peaks), "ranked": ranked}

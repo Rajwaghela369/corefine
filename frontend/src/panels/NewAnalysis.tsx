@@ -173,6 +173,7 @@ function FindReference({ scan, onPick }: { scan: DatasetNode; onPick: (datasetId
       {find.data?.ranked.slice(0, 5).map((r) => (
         <div key={r.candidate} className="flex items-center justify-between gap-2 text-[11.5px]">
           <span className="min-w-0"><b>{r.material.formula}</b> {r.material.spacegroup ?? ""} · explains {r.n_matched} of {r.n_strong} strong peaks
+            {(r.material.e_above_hull_eV ?? 0) > 0.05 && <span className="text-warn"> · unstable ({r.material.e_above_hull_eV!.toFixed(2)} eV above the stable phase)</span>}
             {r.strong_model_lines_missing.length > 0 && <span className="text-warn"> · {r.strong_model_lines_missing.length} predicted lines missing</span>}</span>
           <Button size="sm" disabled={use.isPending} onClick={() => use.mutate(r.candidate)}>Use</Button>
         </div>))}
