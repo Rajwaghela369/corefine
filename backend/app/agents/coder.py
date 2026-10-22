@@ -20,7 +20,7 @@ Skill notes follow.
 
 
 def write_step(plan: Plan, step: PlanStep, manifests: list[Manifest], previous_outputs: list[str],
-               last_code: str | None = None, last_error: str | None = None) -> CoderOutput:
+               last_code: str | None = None, last_error: str | None = None, on_text=None) -> CoderOutput:
     skill_text = "\n\n---\n\n".join(skills.load(n) for n in ("step_contract.md", *skills.for_step(step.skill)))
     parts = [
         f"Run plan: {plan.title}\n{plan.summary}",
@@ -43,4 +43,5 @@ def write_step(plan: Plan, step: PlanStep, manifests: list[Manifest], previous_o
         output=CoderOutput,
         effort="high",
         max_tokens=32000,
+        on_text=on_text,
     )

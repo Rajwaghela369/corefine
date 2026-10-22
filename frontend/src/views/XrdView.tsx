@@ -4,11 +4,13 @@ import { type ReactNode, useMemo, useState } from "react";
 import { api, type GroupRun, type GroupView } from "../api/client";
 import { ClaimBadge } from "../components/ClaimBadge";
 import { Legend, Node } from "../components/Flow";
+import { LiveReasoning, LiveStatus } from "../components/LiveReasoning";
 import { friendlyError, runTitle, verdict } from "../components/labels";
 import { useDetailed } from "../components/prefs";
 import { Dot, Sections } from "../components/Sections";
 import { Button, Empty, Status, Tag, type Tone, clock, cn, duration } from "../components/ui";
 import { XrdChart, type Curve, type Overlay } from "../components/XrdChart";
+import { useLiveFeed } from "../useLiveFeed";
 import { DataPane, PlotsPane, ReportPane } from "./Panes";
 
 export const ENGINE_COLOR: Record<string, string> = { agents: "#121826", gsas2: "#c2410c", maud: "#15803d" };
@@ -73,7 +75,7 @@ export function AnalysisWorkspace({ id, tab, onClose, onAsk }: { id: string; tab
           </div>
         </div>
       </div>
-      <Sections key={id} initial={tab} sections={sections} />
+      <Sections key={id} initial={tab ?? (anyLive ? "reasoning" : undefined)} sections={sections} />
     </div>
   );
 }
@@ -87,7 +89,17 @@ const BANNER: Record<Tone, string> = {
 function Verdict({ id, label }: { id: string; label: string | null }) {
   const run = useQuery({ queryKey: ["run", id], queryFn: () => api.run(id) });
   const [tech, setTech] = useState(false);
+  const feed = useLiveFeed(run.data && live(run.data.status) ? id : null);
   if (!run.data) return null;
+  if (live(run.data.status)) {
+    return (
+      <div className={cn("rounded-lg border px-4 py-2.5", BANNER.run)}>
+        {label && <p className="mb-1 text-[11.5px] font-medium text-muted">{label}</p>}
+        <LiveStatus feed={feed} startedAt={run.data.started_at} />
+        <p className="mt-1 text-[12px] text-ink-2">The answer appears here when the analysis finishes. Follow each step live under Reasoning.</p>
+      </div>
+    );
+  }
   const v = verdict(run.data);
   return (
     <div className={cn("rounded-lg border px-4 py-2.5", BANNER[v.tone])}>
@@ -253,15 +265,36 @@ function ReasoningPane({ d }: { d: GroupView }) {
       </div>
       <div className={cn("grid gap-4", d.runs.length === 2 ? "lg:grid-cols-2" : d.runs.length >= 3 ? "xl:grid-cols-3" : "")}>
         {d.runs.map((r) => (
-          <section key={r.id} className="rounded-lg border border-line bg-surface">
+          <section key={r.id} className="min-w-0 rounded-lg border border-line bg-surface">
             <header className="flex items-center gap-2 border-b border-line px-4 py-2.5">
               <span className="h-2.5 w-2.5 rounded-full" style={{ background: ENGINE_COLOR[r.engine] }} />
               <h2 className="text-[13px] font-semibold">{r.label}</h2>{detailed && <span className="font-mono text-[11px] text-muted">{r.id}</span>}
               <span className="ml-auto"><Status status={r.status} /></span>
             </header>
-            <div className="p-4"><ReasoningFlow r={r} /></div>
+            <RunReasoning r={r} />
           </section>))}
       </div>
+    </div>
+  );
+}
+
+/** While a run is going (and afterwards, as long as the server still holds its events) it is told live; otherwise
+ *  from its records. */
+function RunReasoning({ r }: { r: GroupRun }) {
+  const feed = useLiveFeed(r.id);
+  const [record, setRecord] = useState(false);
+  const running = live(r.status);
+  if (!running && (record || !feed.items.length)) {
+    return <div className="p-4">
+      {feed.items.length > 0 && <button onClick={() => setRecord(false)} className="mb-3 text-[11.5px] text-accent hover:underline">Show the timeline</button>}
+      <ReasoningFlow r={r} />
+    </div>;
+  }
+  return (
+    <div className="flex h-[min(72vh,680px)] flex-col">
+      <div className="min-h-0 flex-1"><LiveReasoning feed={feed} /></div>
+      {!running && <button onClick={() => setRecord(true)} className="border-t border-line px-4 py-2 text-left text-[11.5px] text-accent hover:underline">
+        Show the full record (every decision and the result)</button>}
     </div>
   );
 }

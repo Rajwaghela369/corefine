@@ -125,9 +125,12 @@ export function fixed(v: number | null | undefined, d = 6): string {
   return v === null || v === undefined ? "—" : v.toFixed(d);
 }
 
+// the database stores UTC without a zone suffix; read it as UTC, not local time
+const utc = (t: string) => Date.parse(t.endsWith("Z") || t.includes("+") ? t : t + "Z");
+
 export function duration(a?: string | null, b?: string | null): string {
   if (!a) return "—";
-  const s = Math.max(0, ((b ? Date.parse(b) : Date.now()) - Date.parse(a)) / 1000);
+  const s = Math.max(0, ((b ? utc(b) : Date.now()) - utc(a)) / 1000);
   return s < 60 ? `${s.toFixed(0)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`;
 }
 

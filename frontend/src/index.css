@@ -53,3 +53,21 @@ body {
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #d6dae1; border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+
+/* Live reasoning: the active line shimmers, new entries fade in, streamed text ends in a blinking caret */
+.shimmer {
+  background: linear-gradient(90deg, var(--color-ink) 0%, var(--color-ink) 40%, var(--color-faint) 50%, var(--color-ink) 60%, var(--color-ink) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: shimmer 2.2s linear infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+.live-in { animation: live-in 0.32s ease-out both; }
+@keyframes live-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.caret { display: inline-block; width: 0.5em; height: 1.05em; margin-left: 1px; vertical-align: text-bottom;
+  background: currentColor; opacity: 0.7; animation: caret 1s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .shimmer { animation: none; background: none; color: var(--color-ink); }
+  .live-in, .caret { animation: none; }
+}

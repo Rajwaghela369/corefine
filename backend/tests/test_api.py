@@ -64,16 +64,19 @@ def test_run_api_and_sse(seeded, client, monkeypatch, gold_code):
     monkeypatch.setattr(llm, "parse", fake_parse)
     rid = client.post("/runs", json={"prompt": "Refine silicon", "dataset_ids": ["nist-srm-640f", "cod-9008565-si"],
                                      "session_id": "sess-1"}).json()["id"]
-    statuses = []
+    statuses, activities = [], []
     with client.stream("GET", f"/runs/{rid}/events") as r:
         for line in r.iter_lines():
             if line.startswith("data:"):
                 ev = json.loads(line[5:])
                 if ev["type"] == "step":
                     statuses.append(ev["step"]["status"])
+                if ev["type"] == "activity":
+                    activities.append(ev["agent"])
                 if ev["type"] == "run_finished":
                     break
     assert statuses[0] == "running" and statuses[-1] == "done"
+    assert activities == ["sandbox", "planner", "coder", "sandbox", "checker", "checker", "analyst", "claim_checker"]
     detail = client.get(f"/runs/{rid}").json()
     assert detail["status"] == "done" and detail["headline"]["a_refined"] == pytest.approx(5.430862, abs=1e-6)
     assert client.get(f"/runs/{rid}/artifacts/outputs/fit.png").headers["content-type"] == "image/png"

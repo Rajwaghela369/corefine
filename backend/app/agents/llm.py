@@ -2,11 +2,13 @@
 agents get typed, schema-validated output through Claude's native structured outputs (`method="json_schema"`)."""
 
 import base64
+from collections.abc import Callable
 from functools import lru_cache
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import anthropic
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
@@ -44,13 +46,32 @@ def image_block(png: bytes) -> dict:
                                         "data": base64.standard_b64encode(png).decode()}}
 
 
+class _TextStream(BaseCallbackHandler):
+    """Forwards the model's output text to a callback as it is generated (the JSON of the structured answer)."""
+
+    def __init__(self, on_text: Callable[[str], None]):
+        self.on_text = on_text
+
+    def on_llm_new_token(self, token: str, *, chunk: Any = None, **kwargs: Any) -> None:
+        content = getattr(getattr(chunk, "message", None), "content", None)
+        if isinstance(content, list):
+            token = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+        if token:
+            self.on_text(token)
+
+
 def parse(*, agent: str, system: str, content: list[dict] | str, output: type[T],
-          model: str | None = None, effort: str = "high", max_tokens: int = 16000) -> T:
-    """One structured call. Raises LLMError on refusal, truncation or a missing parsed output."""
+          model: str | None = None, effort: str = "high", max_tokens: int = 16000,
+          on_text: Callable[[str], None] | None = None) -> T:
+    """One structured call. Raises LLMError on refusal, truncation or a missing parsed output.
+    on_text, when given, receives the output text as it streams (for the live view)."""
     runnable = chat_model(model, max_tokens=max_tokens, effort=effort).with_structured_output(
         output, method="json_schema", include_raw=True)
+    config: dict = {"run_name": agent, "tags": [agent]}
+    if on_text:
+        config["callbacks"] = [_TextStream(on_text)]
     try:
-        res = runnable.invoke([SystemMessage(system), HumanMessage(content)], config={"run_name": agent, "tags": [agent]})
+        res = runnable.invoke([SystemMessage(system), HumanMessage(content)], config=config)
     except anthropic.APIStatusError as e:
         raise LLMError(f"{agent}: API error {e.status_code}: {e.message}") from e
     except anthropic.APIConnectionError as e:

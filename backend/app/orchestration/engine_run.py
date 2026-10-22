@@ -23,6 +23,7 @@ from app.agents import checks
 from app.config import get_settings
 from app.models.contracts import Metric, Plan, PlanStep, RunRequest
 from app.models.db import utcnow
+from app.orchestration.live import Live
 from app.orchestration.recorder import Recorder
 from app.storage import datasets
 from app.storage.objects import get_store
@@ -169,9 +170,11 @@ class EngineState(TypedDict, total=False):
 def build_engine_graph(rec: Recorder, req: RunRequest):
     """The fixed engine recipe as a LangGraph graph; each node is one recorded step of the run."""
     s = get_settings()
+    live = Live(rec.run_id)
 
     def prepare_node(state: EngineState) -> EngineState:
         engine = state["engine"]
+        live.activity("orchestrator", "Reading the scan and the reference structure, and deciding the refinement settings")
         manifests = [datasets.load_manifest(i, rec.store) for i in req.dataset_ids]
         measured = next(m for m in manifests if m.role == "measured_pattern")
         reference = engines.reference_for(measured.id, req.dataset_ids)
@@ -198,6 +201,7 @@ def build_engine_graph(rec: Recorder, req: RunRequest):
     def refine_node(state: EngineState) -> EngineState:
         engine, pr, workdir = state["engine"], state["prepared"], state["workdir"]
         rec.step_update(2, status="running", attempts=1)
+        live.activity(engine, f"{engines.ENGINES[engine]['label']} is refining the pattern, stage by stage", step=2)
         r = engines.RUNNERS[engine](pr)
         prev = None
         for st in r["stages"]:
@@ -224,6 +228,7 @@ def build_engine_graph(rec: Recorder, req: RunRequest):
         measured, metrics = state["measured"], state["metrics"]
         rec.step_update(3, status="running", attempts=1)
         rec.run_update(status="analysing")
+        live.activity("checker", "Comparing the refined values with the certificate", step=3)
         comparison = checks.comparison_metrics(metrics, measured.reference_values or {}, s.SUCCESS_TARGET_A)
         if comparison:
             ckey = rec.put("outputs/comparison.json", json.dumps([m.model_dump() for m in comparison], indent=2), 3)
@@ -251,8 +256,11 @@ def build_engine_graph(rec: Recorder, req: RunRequest):
             from app.agents.llm import LLMError
 
             try:
-                out = analyst.write_report(req.prompt + f"\n\n(This run used {engines.ENGINES[engine]['label']}, not generated code.)",
-                                           all_metrics, None, None, state["manifests"], rule_class, state["reasons"])
+                live.activity("analyst", "Writing the report")
+                with live.draft("analyst") as on_text:
+                    out = analyst.write_report(req.prompt + f"\n\n(This run used {engines.ENGINES[engine]['label']}, not generated code.)",
+                                               all_metrics, None, None, state["manifests"], rule_class, state["reasons"],
+                                               on_text=on_text)
                 report, classification = out.report_markdown, out.classification
                 rec.log("analyst", f"classification {out.classification}")
             except LLMError as e:  # the refinement stands; only the prose falls back to code
@@ -261,6 +269,7 @@ def build_engine_graph(rec: Recorder, req: RunRequest):
             report = _code_report(engine, all_metrics, r, pr, rule_class)
             if not s.ANTHROPIC_API_KEY:
                 rec.log("orchestrator", "report written by code (no ANTHROPIC_API_KEY)")
+        live.activity("claim_checker", "Checking every number in the report against the run's files")
         claim = checks.claim_check(report, allowed + [st["Rwp_percent"] for st in r["stages"]])
         rec.log("claim_checker", f"{claim['checked']} numbers checked, {len(claim['untraced'])} untraced")
         rec.put("report.md", report)
