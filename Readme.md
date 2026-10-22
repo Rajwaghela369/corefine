@@ -26,8 +26,10 @@ LLM writes an input file, and no number reaches a report unless a file or a data
 4. [Theory ↔ Experiment](#theory--experiment)
 5. [Where the calculations run](#where-the-calculations-run)
 6. [Configuration](#configuration)
-7. [Tests](#tests)
-8. [Data sources and credits](#data-sources-and-credits)
+7. [Project layout](#project-layout)
+8. [Tests](#tests)
+9. [What it does not do yet](#what-it-does-not-do-yet)
+10. [Data sources and credits](#data-sources-and-credits)
 
 ---
 
@@ -316,6 +318,11 @@ your cluster, can be uploaded and are parsed the same way.
 default cutoff). A setting counts as converged when it is within 1 meV/atom of the most accurate
 point **and a denser point confirms it**. One lucky point is not convergence.
 
+The app shows this as a step flow per code: the plan, the k-mesh series with each point's distance from
+the most accurate one, the decision and the reason for it, then the same for the basis, and finally the
+settings to use. The explanation is rebuilt from the stored points with the study's own rule, so older
+studies show it too, and points appear live while a study is running. The codes sit side by side below.
+
 *The equation-of-state and Raman studies below remain in the backend and API (`/dft/jobs/{id}/studies/…`, the
 co-pilot's `theory_vs_experiment`) but are no longer shown in the UI, which concentrates on runs, band gaps and
 convergence.*
@@ -477,10 +484,29 @@ committed.
 
 ---
 
+## Project layout
+
+```
+backend/
+  app/agents/         Planner, Coder, Analyst, claim checker, chat co-pilot
+  app/orchestration/  run graph (LangGraph), engine runs (GSAS-II, MAUD), experiment log
+  app/sandbox/        Daytona and local subprocess runners
+  app/xrd/            peak fitting, model-vs-scan comparison, phase ID, engine wrappers
+  app/dft/            planner, workflow, studies, one adapter per code in codes/, tools.py installer
+  app/storage/        files, database, datasets, code metadata checks (fair.py)
+  app/api/            FastAPI routes, including /bridge/story
+  skills/             the XRD skill text and the gold analysis
+  scripts/            fetch_data, setup, dft_inputs (command line)
+frontend/src/         React app: views/ (Lab, XRD, DFT, Storage, Theory ↔ Experiment), panels/
+docs/                 SPEC.md and SPEC_CORRECTIONS.md (what the build found wrong in the spec)
+```
+
+---
+
 ## Tests
 
 ```bash
-cd backend && uv run pytest        # 91 tests; LLM mocked, everything else real
+cd backend && uv run pytest        # 115 tests; LLM mocked, everything else real
 uv run pytest -m integration       # the 3 that call real services (keys needed)
 ```
 
@@ -501,6 +527,18 @@ uv run pytest -m integration       # the 3 that call real services (keys needed)
 - Raman selection rules;
 - peak matching, scale fitting and phase identification;
 - the bridge aggregation.
+
+---
+
+## What it does not do yet
+
+- **ARPES and band-structure comparison.** Only band gaps and lattice parameters are compared so far.
+- **Magnetic materials** are refused, not run as non-magnetic. **Surface slabs, supercells and defects** are
+  not modelled.
+- **MAUD** has no calibrated instrument file, so it fits the narrow NIST peaks poorly (see above).
+- **No authentication.** The backend trusts whoever can reach it. Run it on your own machine, and put a
+  password in front of it before exposing it anywhere.
+- **macOS and Windows** are untested; the Linux path is the one that has been run.
 
 ---
 
