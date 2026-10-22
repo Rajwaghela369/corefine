@@ -41,7 +41,7 @@ def activity(characters: np.ndarray, rotations: np.ndarray) -> tuple[bool, bool]
 
 
 def gamma_modes(ph: Phonopy) -> list[dict]:
-    ir = ph.set_irreps([0, 0, 0])
+    ir = ph.run_irreps([0, 0, 0])
     labels = getattr(ir, "_ir_labels", None)
     freqs = ir.frequencies
     out = []
@@ -117,7 +117,7 @@ def run(set_dir: Path, code: str, kmesh: tuple[int, int, int] | None = None) -> 
     ph.symmetrize_force_constants()
     modes = gamma_modes(ph)
     return _save(d, status="done", message="", modes=modes, spectrum=spectrum(modes),
-                 point_group=getattr(ph.set_irreps([0, 0, 0]), "_pointgroup_symbol", None),
+                 point_group=getattr(ph.run_irreps([0, 0, 0]), "_pointgroup_symbol", None),
                  notes=["Raman/IR activity from group theory; intensities not computed",
                         "polar crystals: no LO-TO splitting (Born charges not computed)"])
 

@@ -26,17 +26,36 @@ from app.storage.objects import get_store
 MAX_ARTIFACT_CHARS = 20_000
 HISTORY_TURNS = 12
 
-SYSTEM = """You are the CoRefine co-pilot. You help a researcher understand analysis runs on X-ray
-diffraction data (currently silicon lattice-parameter refinement against NIST SRM 640f).
+SYSTEM = """You are the CoRefine co-pilot. You help two kinds of users:
+- research data managers and curators: is a dataset documented, licensed, traceable and reproducible?
+- scientists: does a measurement agree with simulation, which model explains it, what to do next?
+
+What CoRefine holds: measured powder XRD datasets with manifests (list_datasets, get_dataset), agent
+refinement runs on them (list_runs, get_run, query_metrics, read_artifact, compare_runs), DFT sets from
+several codes with equations of state and Raman modes (list_dft_sets, get_dft_set), and tools that put
+the two side by side (theory_vs_experiment, compare_pattern, identify_phase).
 
 Rules:
 - Answer from tool results, not memory. Fetch before you answer.
 - Every number you state must appear in a tool result from this turn, copied with the same or
-  fewer decimals. Do not compute new numbers. If you need a comparison, call compare_runs.
+  fewer decimals. Do not compute new numbers. If you need a comparison, call compare_runs,
+  theory_vs_experiment or compare_pattern.
+- For metadata, licence or reproducibility questions call check_dataset_metadata and report each
+  check as found or missing; do not declare a dataset "FAIR" or not, list what is and is not there.
+- Say plainly what CoRefine cannot answer: it has no ARPES or band-structure comparison, no surface
+  slabs or supercells, and no defect models. When a question needs those, say so and say what data or
+  calculation would be needed instead.
+- Suggestions for next measurements or calculations are allowed, but mark them as suggestions and do
+  not attach numbers that no tool returned.
 - When the user asks for a new or follow-up run, call start_run. It only proposes the run; tell the
   user to confirm it with the button that appears.
 - Be brief: two to six sentences unless asked for more. Explain physics in plain language.
 """
+
+
+def _clip(obj) -> str:
+    text = json.dumps(obj, default=str)
+    return text[:MAX_ARTIFACT_CHARS] + ("…(truncated)" if len(text) > MAX_ARTIFACT_CHARS else "")
 
 
 def _metric_dict(m: MetricRow) -> dict:
@@ -136,6 +155,126 @@ def compare_runs(run_a: str, run_b: str) -> str:
 
 
 @tool
+def list_datasets() -> str:
+    """Datasets in Storage: id, role (measured_pattern, reference_structure, ...), technique, material, format."""
+    return _clip([{"id": r.id, "role": r.role, "technique": r.technique, "material": r.material, "format": r.format}
+                  for r in datasets.list_indexed()])
+
+
+@tool
+def get_dataset(dataset_id: str) -> str:
+    """Full manifest of one dataset (instrument, wavelength and its source, licence, checksums, reference
+    values with their source), its README and the list of its files."""
+    store = get_store()
+    try:
+        m = datasets.load_manifest(dataset_id, store)
+    except datasets.ManifestError as e:
+        return json.dumps({"error": str(e)})
+    key = f"{datasets.PREFIX}{dataset_id}/README.md"
+    files = [k.rsplit("/", 1)[-1] for k in datasets.dataset_files(m, store)]
+    return _clip({"manifest": m.model_dump(exclude_none=True), "files": files, "n_files": len(files),
+                  "readme": store.get(key).decode(errors="replace") if store.exists(key) else None})
+
+
+@tool
+def check_dataset_metadata(dataset_id: str) -> str:
+    """Code-run metadata checks for one dataset: persistent identifier, licence, checksum, files, README,
+    radiation, wavelength and its source, temperature, reference-value source and uncertainty."""
+    from app.storage import fair
+
+    try:
+        m = datasets.load_manifest(dataset_id)
+    except datasets.ManifestError as e:
+        return json.dumps({"error": str(e)})
+    results = fair.check(m)
+    return json.dumps({"dataset": dataset_id, "checks": results,
+                       "missing": [r["check"] for r in results if not r["ok"]]})
+
+
+@tool
+def list_dft_sets(material: str | None = None) -> str:
+    """DFT input sets, newest first: id, formula, functional, k-mesh, codes, whether input checks passed.
+    material: a formula such as Si or ZnO to filter by."""
+    from app.api.bridge import _same
+    from app.api.dft import list_jobs
+
+    rows = list_jobs()
+    if material:
+        rows = [r for r in rows if _same(r["formula"], material)]
+    return _clip(rows[:30])
+
+
+@tool
+def get_dft_set(set_id: str) -> str:
+    """One DFT set: the request (structure source, functional, k-mesh), per-code inputs and the defaults
+    they rely on, input checks, run results (energy, gap, convergence) and study results (convergence,
+    equation of state, Raman). Use for provenance and reproducibility questions about simulations."""
+    from fastapi import HTTPException
+
+    from app.api.dft import get_job
+
+    try:
+        job = get_job(set_id)
+    except (HTTPException, OSError, ValueError) as e:
+        return json.dumps({"error": getattr(e, "detail", str(e))})
+    prov = job["provenance"]
+    checks_ = job["checks"]
+    studies = job.get("studies") or {}
+    for st in studies.values():  # drop curves; keep fits and settings
+        if isinstance(st, dict):
+            for c in (st.get("codes") or {}).values():
+                if isinstance(c, dict):
+                    c.pop("points", None)
+            st.pop("spectrum", None)
+    return _clip({"id": set_id, "provenance": prov, "checks_passed": checks_.get("passed"),
+                  "failed_checks": [r for r in checks_.get("results", []) if not r.get("ok")],
+                  "runs": job.get("runs"), "summary": job.get("summary"), "studies": studies,
+                  "n_files": len(job.get("files", []))})
+
+
+@tool
+def theory_vs_experiment(material: str) -> str:
+    """For one material (formula, e.g. Si): refined lattice parameters from XRD runs, certified values from
+    dataset manifests, DFT a0 and B0 per code and functional with the percentage difference to experiment
+    and the pressure equivalent, and Raman-active modes."""
+    from app.api.bridge import bridge
+
+    return _clip(bridge(material))
+
+
+@tool
+def compare_pattern(dataset_id: str, structure: str, file: str | None = None) -> str:
+    """Match the peaks of a measured scan to the reflections of a model structure. structure: dataset:<id>
+    (a reference or DFT structure in Storage), mp:<mp-id> or cod:<id>. Returns matched reflections, the best
+    lattice scale, implied lattice parameters, strain, zero shift and unmatched peaks."""
+    from fastapi import HTTPException
+
+    from app.api.xrd import CompareBody, compare
+
+    try:
+        r = compare(CompareBody(dataset=dataset_id, structure=structure, file=file))
+    except HTTPException as e:
+        return json.dumps({"error": e.detail})
+    for k in ("profile", "measured_peaks", "model_reflections"):
+        r.pop(k, None)
+    return _clip(r)
+
+
+@tool
+def identify_phase(dataset_id: str, file: str | None = None, formula: str | None = None) -> str:
+    """Rank Materials Project polymorphs of the dataset's material (or `formula`) by how well their
+    reflections explain the measured peaks."""
+    from fastapi import HTTPException
+
+    from app.api.xrd import IdentifyBody, identify
+
+    try:
+        return _clip(identify(IdentifyBody(dataset=dataset_id, file=file, formula=formula)))
+    except HTTPException as e:
+        return json.dumps({"error": e.detail})
+
+
+@tool
 def start_run(prompt: str, dataset_ids: list[str], parent_run_id: str | None = None) -> str:
     """Propose a new run. Does not start it: the user must confirm in the UI. A run needs at least one
     dataset with role measured_pattern; a reference structure alone cannot be refined."""
@@ -146,12 +285,14 @@ def start_run(prompt: str, dataset_ids: list[str], parent_run_id: str | None = N
         return json.dumps({"error": str(e)})
     if "measured_pattern" not in roles:
         return json.dumps({"error": "no dataset with role measured_pattern selected; ask the user to add a "
-                                    "measured scan (e.g. nist-srm-640f) to the inputs"})
+                                    "measured scan (e.g. nist-srm-640f, nist-srm-660c, nist-srm-1979-60nm) to the inputs"})
     return json.dumps({"proposed_run": {"prompt": prompt, "dataset_ids": dataset_ids, "parent_run_id": parent_run_id},
                        "note": "Waiting for the user to confirm in the UI."})
 
 
-TOOLS = [list_runs, get_run, query_metrics, read_artifact, search_knowledge, compare_runs, start_run]
+TOOLS = [list_runs, get_run, query_metrics, read_artifact, search_knowledge, compare_runs, list_datasets, get_dataset,
+         check_dataset_metadata, list_dft_sets, get_dft_set, theory_vs_experiment, compare_pattern, identify_phase,
+         start_run]
 
 
 @lru_cache
@@ -187,8 +328,9 @@ def _text(content) -> str:
 
 def chat(session_id: str, message: str, selected_dataset_ids: list[str] | None = None) -> Iterator[dict]:
     """Yields events: tool_call, tool_result, answer (with claim check and any proposed run)."""
+    if not get_settings().ANTHROPIC_API_KEY:
+        raise RuntimeError("The co-pilot needs ANTHROPIC_API_KEY in backend/.env; nothing was sent or saved.")
     history = _history(session_id)
-    _save(session_id, "user", message)
     user = message if not selected_dataset_ids else f"{message}\n\n(Datasets selected in the UI: {selected_dataset_ids})"
     config = {"recursion_limit": 40}
     lf_handler = _langfuse_handler()
@@ -217,6 +359,8 @@ def chat(session_id: str, message: str, selected_dataset_ids: list[str] | None =
                     yield {"type": "tool_result", "name": msg.name, "chars": len(text)}
     allowed = [v for t in tool_texts for v in checks.numbers_in(t)]
     claim = checks.claim_check(final, allowed)
+    # Saved only once the agent has answered, so a failed call (no key, API error) leaves no orphan question
+    _save(session_id, "user", message)
     _save(session_id, "assistant", final)
     yield {"type": "answer", "content": final, "claim_check": claim, "proposed_run": proposed}
 

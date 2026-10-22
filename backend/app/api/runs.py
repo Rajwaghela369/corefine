@@ -1,6 +1,7 @@
 import asyncio
 import json
 import mimetypes
+import secrets
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -29,6 +30,19 @@ def _new_run_id() -> str:
         return f"run-{day}-{n + 1:03d}"
 
 
+def start_runs(req: RunRequest) -> dict:
+    """One run per selected engine. With more than one, they share a group_id so they can be compared."""
+    from app.xrd import engines
+
+    for e in req.engines:
+        ok, why = engines.available(e)
+        if not ok:
+            raise HTTPException(400, detail=why)
+    group = f"grp-{datetime.now(UTC):%Y%m%d-%H%M%S}-{secrets.token_hex(2)}" if len(req.engines) > 1 else None
+    ids = [start_run(req.model_copy(update={"engine": e, "group_id": group})) for e in dict.fromkeys(req.engines)]
+    return {"id": ids[0], "ids": ids, "group_id": group}
+
+
 def start_run(req: RunRequest) -> str:
     for ds_id in req.dataset_ids:
         try:
@@ -44,7 +58,8 @@ def start_run(req: RunRequest) -> str:
     run_id = _new_run_id()
     with get_sessionmaker()() as db, db.begin():
         db.add(RunRow(id=run_id, prompt=req.prompt, dataset_ids=req.dataset_ids, status="queued",
-                      parent_run_id=req.parent_run_id, session_id=req.session_id))
+                      parent_run_id=req.parent_run_id, session_id=req.session_id, engine=req.engine,
+                      group_id=req.group_id))
     bus.publish(run_id, "run_status", status="queued")
     _pool.submit(execute_run, run_id, req)
     return run_id
@@ -52,7 +67,25 @@ def start_run(req: RunRequest) -> str:
 
 @router.post("")
 def create_run(req: RunRequest):
-    return {"id": start_run(req)}
+    return start_runs(req)
+
+
+@router.get("/engines")
+def list_engines():
+    from app.dft import tools
+    from app.xrd import engines
+
+    state = {x["name"]: x for x in tools.status()}
+    return [{"name": n, **e, "available": engines.available(n)[0], "reason": engines.available(n)[1],
+             "install": {k: state[e["tool"]][k] for k in ("status", "message", "size", "license")} if e["tool"] else None}
+            for n, e in engines.ENGINES.items()]
+
+
+@router.get("/group/{group_id}")
+def group(group_id: str):
+    from app.orchestration.engine_run import group_view
+
+    return group_view(group_id)
 
 
 @router.get("")
@@ -63,6 +96,7 @@ def list_runs(limit: int = 50):
         for r in runs:
             ms = list(db.scalars(select(MetricRow).where(MetricRow.run_id == r.id, MetricRow.name == "a_refined")))
             out.append({"id": r.id, "prompt": r.prompt, "status": r.status, "dataset_ids": r.dataset_ids,
+                        "engine": r.engine or "agents", "group_id": r.group_id,
                         "parent_run_id": r.parent_run_id, "classification": r.classification,
                         "claim_passed": (r.claim_check or {}).get("passed"),
                         "started_at": r.started_at, "finished_at": r.finished_at, "headline": headline(ms)})
@@ -90,6 +124,7 @@ def get_run(run_id: str):
         "id": r.id, "prompt": r.prompt, "status": r.status, "dataset_ids": r.dataset_ids, "plan": r.plan,
         "error": r.error, "classification": r.classification, "claim_check": r.claim_check,
         "parent_run_id": r.parent_run_id, "started_at": r.started_at, "finished_at": r.finished_at,
+        "engine": r.engine or "agents", "group_id": r.group_id,
         "steps": [{"idx": s.idx, "name": s.name, "status": s.status, "attempts": s.attempts, "error": s.error,
                    "code_key": s.code_key and s.code_key.removeprefix(prefix),
                    "stdout_key": s.stdout_key and s.stdout_key.removeprefix(prefix)} for s in steps],

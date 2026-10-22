@@ -50,6 +50,7 @@ default-groups = ["dev", "science"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = ["integration: hits real cloud services (skipped by default)"]
 addopts = "-m 'not integration'"
 

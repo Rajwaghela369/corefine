@@ -87,7 +87,8 @@ def list_jobs():
         out.append({"id": d.name, "created": prov["created"], "structure": prov["request"]["structure"],
                     "formula": prov["cell"]["formula"], "functional": prov["request"]["functional"],
                     "kmesh": prov["request"]["kmesh"], "codes": prov["request"]["codes"], "passed": chk["passed"],
-                    "n_checks": len(chk["results"]), "n_failed": sum(not r["ok"] for r in chk["results"])})
+                    "n_checks": len(chk["results"]), "n_failed": sum(r["ok"] is False for r in chk["results"]),
+                    "n_passed": sum(r["ok"] is True for r in chk["results"])})
     return out
 
 
@@ -192,11 +193,14 @@ async def import_results(job_id: str, code: str, files: list[UploadFile]):
 
 # what one click installs to make a code usable locally
 CODE_TOOLS = {"espresso": ["qe", "sssp-pbe"], "gpaw": ["gpaw"], "abinit": ["abinit", "pseudodojo-pbe"]}
+# pseudopotential libraries for the other functionals, offered once the code itself is usable
+FUNCTIONAL_TOOLS = {"espresso": {"PBEsol": ["sssp-pbesol"], "LDA": ["jth-lda"]}, "abinit": {"LDA": ["pseudodojo-lda"]}}
 
 
 @router.get("/tools")
 def list_tools():
     return {"tools": tools.status(), "not_installable": tools.NOT_INSTALLABLE, "code_tools": CODE_TOOLS,
+            "functional_tools": FUNCTIONAL_TOOLS,
             "local": execute.local_executables()}
 
 

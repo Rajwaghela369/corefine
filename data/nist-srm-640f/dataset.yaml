@@ -9,8 +9,10 @@ instrument:
   wavelength_A: 1.5405929     # NOT in the CIFs; from NIST SRM 640f certificate, Table 1 (λ = 0.15405929 nm)
   wavelength_source: "NIST SRM 640f certificate (26 Feb 2019), Table 1"
   goniometer_radius_mm: 217.5 # file: _pd_instr_dist_spec/detc
-temperature_C: null           # per scan in the file: _pd_spec_temperature (≈20.4–20.6 °C)
+temperature_C: null
+temperature_note: "per scan in the file: _pd_spec_temperature (about 20.4–20.6 °C)"
 source: https://doi.org/10.18434/M32251
+license: "NIST open license (https://www.nist.gov/open/license)"   # from the NIST data record of mds2-2251
 sha256_zip: f135999e3c1639a9825b3d09c464756db569fab7d690ef028992daad8ffe0b96
 reference_values:             # visible to the Analyst and claim checker only, never to the Coder
   a_A: 5.431144

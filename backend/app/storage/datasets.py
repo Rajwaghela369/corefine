@@ -80,6 +80,7 @@ class TreeNode:
     valid: bool
     problem: str | None
     files: list[str]
+    material: str | None = None
 
 
 def tree(store: ObjectStore | None = None) -> list[TreeNode]:
@@ -93,7 +94,7 @@ def tree(store: ObjectStore | None = None) -> list[TreeNode]:
     for ds_id, files in sorted(folders.items()):
         try:
             m = load_manifest(ds_id, store)
-            nodes.append(TreeNode(ds_id, m.role, True, None, sorted(files)))
+            nodes.append(TreeNode(ds_id, m.role, True, None, sorted(files), m.material))
         except ManifestError as e:
             nodes.append(TreeNode(ds_id, None, False, str(e), sorted(files)))
     return nodes

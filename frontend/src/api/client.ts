@@ -3,7 +3,8 @@
 export const API = "/api";
 
 export type Role = "measured_pattern" | "reference_structure" | "reference_value";
-export interface DatasetNode { id: string; role: Role | null; valid: boolean; problem: string | null; files: string[] }
+export interface DatasetNode { id: string; role: Role | null; valid: boolean; problem: string | null; files: string[];
+  material?: string | null }
 export type StepStatus = "pending" | "running" | "retrying" | "done" | "failed";
 export interface Step { idx: number; name: string; status: StepStatus; attempts: number; error: string | null;
   code_key: string | null; stdout_key: string | null }
@@ -13,14 +14,25 @@ export interface PlanStep { idx: number; name: string; goal: string; dataset_ids
   uses_previous_outputs: string[]; outputs: string[]; skill: string }
 export interface ClaimCheck { passed: boolean; checked: number; untraced: { number: string; line: number; context: string }[] }
 export interface Headline { a_refined: number; uncertainty: number | null; unit: string | null }
+export type Engine = "agents" | "gsas2" | "maud";
+export interface EngineInfo { name: Engine; label: string; about: string; available: boolean; reason: string; tool: string | null;
+  install: { status: string; message: string; size: string; license: string } | null }
+export interface GroupRun { id: string; engine: Engine; label: string; status: string; error: string | null;
+  metrics: Record<string, { value: number | null; uncertainty: number | null; unit: string | null }>;
+  curve?: { x: number[]; observed: number[]; calculated: number[]; background: number[] };
+  reflections?: { two_theta: number; intensity: number; hkl: string }[] }
+export interface GroupView { group_id: string; dataset: string; runs: GroupRun[];
+  measured?: { file: string; x: number[]; y: number[]; wavelength_A: number };
+  certified?: { a_A?: number; a_uncertainty_A?: number; c_A?: number; c_uncertainty_A?: number; source?: string } }
 export interface RunListItem { id: string; prompt: string; status: string; dataset_ids: string[];
+  engine?: Engine; group_id?: string | null;
   parent_run_id: string | null; classification: string | null; claim_passed: boolean | null;
   started_at: string | null; finished_at: string | null; headline: Headline | null }
 export interface RunDetail extends Omit<RunListItem, "claim_passed"> {
   plan: { title: string; summary: string; steps: PlanStep[] } | null; error: string | null;
   claim_check: ClaimCheck | null; steps: Step[]; metrics: Metric[];
   artifacts: { step_idx: number | null; kind: string; path: string; sha256: string }[] }
-export interface ProposedRun { prompt: string; dataset_ids: string[]; parent_run_id: string | null }
+export interface ProposedRun { prompt: string; dataset_ids: string[]; parent_run_id: string | null; engines?: Engine[] }
 export interface ChatMessage { role: "user" | "assistant"; content: string; run_id?: string | null;
   claim_check?: ClaimCheck; proposed_run?: ProposedRun | null; tools?: string[] }
 
@@ -52,7 +64,9 @@ export const api = {
   run: (id: string) => fetch(`${API}/runs/${id}`).then(json<RunDetail>),
   startRun: (body: ProposedRun & { session_id: string }) =>
     fetch(`${API}/runs`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body) }).then(json<{ id: string }>),
+      body: JSON.stringify(body) }).then(json<{ id: string; ids: string[]; group_id: string | null }>),
+  engines: () => fetch(`${API}/runs/engines`).then(json<EngineInfo[]>),
+  group: (id: string) => fetch(`${API}/runs/group/${id}`).then(json<GroupView>),
   artifactText: (runId: string, path: string) => fetch(`${API}/runs/${runId}/artifacts/${path}`).then((r) => r.text()),
   artifactUrl: (runId: string, path: string) => `${API}/runs/${runId}/artifacts/${path}`,
   health: () => fetch(`${API}/health`).then(json<Health>),
@@ -104,7 +118,7 @@ export function sessionId(): string {
 
 export interface DftCheck { check: string; ok: boolean | null; detail: string; code?: string | null }
 export interface DftJobListItem { id: string; created: string; structure: string; formula: string; functional: string;
-  kmesh: number[]; codes: string[]; passed: boolean; n_checks: number; n_failed: number }
+  kmesh: number[]; codes: string[]; passed: boolean; n_checks: number; n_failed: number; n_passed?: number }
 export interface DftCell { formula: string; natoms: number; spacegroup: string; volume_A3: number;
   volume_per_atom_A3: number; lattice_lengths_A: number[]; nearest_neighbour_A: number }
 export interface DftJob {
@@ -122,6 +136,22 @@ export interface DftJob {
 export interface RamanMode { frequency_cm1: number; degeneracy: number; label: string | null; acoustic: boolean; raman_active: boolean; ir_active: boolean }
 export interface RamanStudy { status: string; message?: string; code: string; kmesh?: number[]; point_group?: string; modes?: RamanMode[];
   spectrum?: { x: number[]; y: number[]; fwhm_cm1: number; note: string }; notes?: string[]; n_displacements?: number }
+export interface StoryMetric { value: number | null; uncertainty: number | null; unit: string | null }
+export interface ExperimentStory { run: string; engine: Engine; status: string; prompt: string; datasets: string[];
+  group_id: string | null; error: string | null; plan_title: string | null; plan_summary: string | null;
+  steps: { idx: number; name: string; status: string; attempts: number; error: string | null; goal: string | null }[];
+  log: { time: string; agent: string; note: string }[]; classification: string | null;
+  claim: { passed: boolean; checked: number } | null; result: Record<string, StoryMetric> }
+export interface TheoryStory { set: string; created: string; goal: string | null;
+  request: { structure: string; functional: string; kmesh: number[]; codes: string[] };
+  cell: { formula: string; spacegroup: string; natoms: number }; lattice: { a_A?: number; c_A?: number };
+  decisions: { field: string; value: string; reason: string; source: string }[]; warnings: string[]; planner: string | null;
+  checks: { passed: boolean; n_passed: number; n_not_run: number; failed: { check: string; detail: string }[] };
+  codes: Record<string, string>;
+  runs: Record<string, { label: string; status: string; converged: boolean | null; iterations: number | null; gap_eV: number | null;
+    healed: { error: string; change: string; why: string } | null; message: string; attempts: number }>;
+  reference: { source: string; band_gap_eV: number | null; is_metal: boolean | null } | null }
+export interface Story { material: string; experiment: ExperimentStory[]; theory: TheoryStory[] }
 export interface Bridge { material: string; experiment_reference: string | null; notes: string[];
   experiment: { run: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; classification: string | null }[];
   certified: { dataset: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; source: string | null }[];
@@ -149,7 +179,8 @@ export interface DftRun { code: string; target: string; kind: string; status: st
 export interface DftTarget { name: string; kind: "local" | "slurm"; host: string | null; codes: string[]; confirm: boolean }
 export interface DftTool { name: string; label: string; license: string; size: string; source: string; installable: boolean;
   status: string; message: string; version: string | null }
-export interface DftTools { tools: DftTool[]; not_installable: Record<string, string>; code_tools: Record<string, string[]>; local: Record<string, string> }
+export interface DftTools { tools: DftTool[]; not_installable: Record<string, string>; code_tools: Record<string, string[]>;
+  functional_tools: Record<string, Record<string, string[]>>; local: Record<string, string> }
 export interface MpMaterial { id: string; formula: string; nsites: number; spacegroup: string | null; e_above_hull_eV: number | null;
   band_gap_eV: number | null; is_metal: boolean | null; ordering: string | null; stable: boolean; fits_laptop: boolean }
 export interface PlanDecision { field: string; value: string; reason: string; source: "user" | "rule" | "agent" | "materials_project" }
@@ -174,6 +205,7 @@ export const dft = {
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, kmesh: kmesh ?? null }) }).then(json),
   planPreview: (material: string, functional: string) =>
     fetch(`${API}/dft/plan-preview?material=${encodeURIComponent(material)}&functional=${functional}`).then(json<{ plan: DftPlan; material: MpMaterial }>),
+  story: (material: string) => fetch(`${API}/bridge/story?material=${encodeURIComponent(material)}`).then(json<Story>),
   bridge: (material: string) => fetch(`${API}/bridge?material=${encodeURIComponent(material)}`).then(json<Bridge>),
   saveEos: (id: string, code: string) => fetch(`${API}/dft/jobs/${id}/studies/eos/${code}/save`, { method: "POST" })
     .then(json<{ dataset: string }>),

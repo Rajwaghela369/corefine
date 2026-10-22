@@ -1,0 +1,25 @@
+id: nist-srm-1979-15nm
+role: measured_pattern
+technique: xrd_powder
+material: ZnO
+format: pdcif
+files: [raw/*_15_nm_*.cif]
+instrument:
+  radiation: synchrotron      # file: _diffrn_radiation_type synchrotron (APS 11-BM)
+  wavelength_A: 0.41419       # file: _diffrn_radiation_wavelength 0.414190 (_diffrn_radiation_wavelength_determination refined)
+  wavelength_source: "in each file: _diffrn_radiation_wavelength (refined by NIST)"
+  ka2_present: false          # monochromatic synchrotron beam
+temperature_C: null
+temperature_note: "file: _pd_spec_temperature 295 and _diffrn_ambient_temperature 295, units not stated (reads as kelvin)"
+sample_note: "SRM 1979 15 nm nominal ZnO nanocrystallites (crystallite-size standard): peaks are size- and stacking-fault-broadened"
+source: https://doi.org/10.18434/M32269
+license: "NIST open license (https://www.nist.gov/open/license)"   # from the NIST data record of mds2-2269
+sha256_zip: 1642638f56c36d7fd77929762638b794f3d3684e9bdc69301fc09496881d9544
+reference_values:             # visible to the Analyst and claim checker only, never to the Coder
+  a_A: 3.249664
+  a_uncertainty_A: 0.00030       # certificate Table 3: Type A + B, k = 2
+  c_A: 5.208330
+  c_uncertainty_A: 0.00030
+  a_reference_temperature_C: 22.5
+  source: "NIST SRM 1979 certificate (04 June 2021), Table 3 (15 nm material)"
+  note: "certified from laboratory (Cu Kα) data on thin-film specimens, not from these 11-BM scans"

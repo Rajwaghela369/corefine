@@ -222,6 +222,15 @@ def _parent_context(store, parent_id: str) -> str:
 def execute_run(run_id: str, req: RunRequest) -> None:
     """Run the whole graph synchronously (call from a worker thread). Never raises."""
     ctx = None
+    if req.engine != "agents":
+        from app.orchestration.engine_run import execute_engine_run
+
+        try:
+            execute_engine_run(run_id, req)
+        finally:
+            _after_run(run_id, req)
+            bus.publish(run_id, "run_finished")
+        return
     try:
         ctx = _Ctx(run_id, req)
         graph = build_graph(ctx)

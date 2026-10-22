@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Database, FileClock, FileText, LayoutDashboard, LineChart, Table2, Workflow, X } from "lucide-react";
+import { Columns3, Database, FileClock, FileText, LayoutDashboard, LineChart, Table2, Workflow, X } from "lucide-react";
 import { Welcome, WelcomeSection } from "../components/Welcome";
 import { useEffect, useState } from "react";
 import { api, type RunDetail } from "../api/client";
@@ -10,6 +10,7 @@ import { RunsList } from "../panels/RunsList";
 import { useRunEvents } from "../useRunEvents";
 import { BridgeView } from "./BridgeView";
 import { DftView } from "./DftView";
+import { EngineCompare } from "./EngineCompare";
 import { DataPane, InteractiveRunPlot, PlanPane, PlotsPane, ReportPane } from "./Panes";
 
 export function LabView({ session, runId, setRunId, selected, toggle }: {
@@ -76,6 +77,7 @@ function XrdLab({ session, runId, setRunId, selected, toggle }: {
   );
 }
 
+export const ENGINE_LABEL: Record<string, string> = { agents: "Agents", gsas2: "GSAS-II", maud: "MAUD" };
 const metric = (run: RunDetail, name: string) => run.metrics.find((m) => m.name === name);
 const asNum = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && v !== "" && !isNaN(Number(v)) ? Number(v) : null);
 
@@ -97,6 +99,7 @@ function Summary({ run, onClose }: { run: RunDetail; onClose: () => void }) {
       <div className="flex items-center gap-3 px-5 pb-2 pt-3">
         <h1 className="font-mono text-[13px] font-semibold">{run.id}</h1>
         <Status status={run.status} />
+        <Tag tone="neutral">{ENGINE_LABEL[run.engine ?? "agents"]}</Tag>
         <span className="text-xs text-muted">{clock(run.started_at)} · {duration(run.started_at, run.finished_at)}</span>
         {run.parent_run_id && <span className="text-xs text-muted">follow-up of <span className="font-mono">{run.parent_run_id}</span></span>}
         <span className="ml-auto truncate text-xs text-muted" title={run.dataset_ids.join(", ")}>
@@ -146,6 +149,7 @@ function Workspace({ run, onClose }: { run: RunDetail; onClose: () => void }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <Summary run={run} onClose={onClose} />
       <Sections key={run.id} sections={[
+        ...(run.group_id ? [{ key: "compare", label: "Compare engines", icon: Columns3, body: <EngineCompare groupId={run.group_id} /> }] : []),
         { key: "overview", label: "Overview", icon: LayoutDashboard, badge: live ? <Dot tone="run" /> : undefined,
           body: <XrdOverview run={run} measuredId={measuredId} peaksPath={peaksPath} /> },
         { key: "plan", label: "Plan", icon: Workflow, badge: failed ? <Dot tone="bad" /> : undefined,

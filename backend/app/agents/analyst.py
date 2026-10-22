@@ -13,6 +13,10 @@ a short, honest report for a researcher who does not write code. You look at the
 ---
 
 {si_reference}
+
+---
+
+{other_references}
 """
 
 
@@ -34,7 +38,8 @@ def write_report(prompt: str, metrics: list[Metric], peaks_csv: str | None, plot
     content.append({"type": "text", "text": text})
     return llm.parse(
         agent="analyst",
-        system=SYSTEM.format(report_rules=skills.load("report_rules.md"), si_reference=skills.load("si_reference.md")),
+        system=SYSTEM.format(report_rules=skills.load("report_rules.md"), si_reference=skills.load("si_reference.md"),
+                             other_references=skills.load("other_references.md")),
         content=content,
         output=AnalystOutput,
         effort="high",

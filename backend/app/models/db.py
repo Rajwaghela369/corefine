@@ -46,6 +46,8 @@ class RunRow(Base):
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
     parent_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), nullable=True)
+    engine: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class StepRow(Base):
@@ -107,6 +109,19 @@ def get_sessionmaker() -> sessionmaker:
     return sessionmaker(get_engine(), expire_on_commit=False)
 
 
+# Columns added after the first release; create_all does not add columns to an existing table
+ADDED_COLUMNS = {"runs": {"engine": "VARCHAR(16)", "group_id": "VARCHAR(64)"}}
+
+
 def init_db() -> None:
-    """Create all tables if absent. Idempotent: safe to run on every start."""
-    Base.metadata.create_all(get_engine())
+    """Create all tables if absent and add later columns. Idempotent: safe to run on every start."""
+    from sqlalchemy import inspect, text
+
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    have = {t: {c["name"] for c in inspect(engine).get_columns(t)} for t in ADDED_COLUMNS}
+    with engine.begin() as conn:
+        for table, cols in ADDED_COLUMNS.items():
+            for name, sqltype in cols.items():
+                if name not in have[table]:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sqltype}"))

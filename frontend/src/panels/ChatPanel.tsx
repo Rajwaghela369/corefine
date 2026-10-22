@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CornerDownLeft, Plus, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
-import { api, chatStream, type ChatMessage, type ClaimCheck, type ProposedRun } from "../api/client";
+import { api, chatStream, dft, type ChatMessage, type ClaimCheck, type Engine, type ProposedRun } from "../api/client";
 import { Button, PanelHeader, Status, Tag, cn } from "../components/ui";
 import { useRunEvents } from "../useRunEvents";
 
@@ -21,6 +21,12 @@ export function ChatPanel({ session, datasets, onRunStarted, selectedRun, onTogg
   const [view, setView] = useState<"activity" | "history">("history");
   const [picking, setPicking] = useState(false);
   const all = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
+  const engineList = useQuery({ queryKey: ["engines"], queryFn: api.engines,
+    refetchInterval: (q) => (q.state.data?.some((e) => e.install?.status === "installing") ? 3000 : false) });
+  const installing = (engineList.data ?? []).find((e) => e.install?.status === "installing");
+  const installEngine = async (tool: string) => { setError(null); try { await dft.installTool(tool); } catch (e) { setError(friendly(e)); }
+    qc.invalidateQueries({ queryKey: ["engines"] }); };
+  const [engines, setEngines] = useState<Engine[]>(["agents"]);
   const available = (all.data ?? []).filter((d) => d.valid && !datasets.includes(d.id));
   const end = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
@@ -49,7 +55,7 @@ export function ChatPanel({ session, datasets, onRunStarted, selectedRun, onTogg
   async function start(p: ProposedRun) {
     setError(null);
     try {
-      const { id } = await api.startRun({ ...p, session_id: session });
+      const { id } = await api.startRun({ ...p, engines: p.engines ?? engines, session_id: session });
       setRunIds((r) => [...r, id]);
       setView("activity");
       onRunStarted(id);
@@ -58,7 +64,10 @@ export function ChatPanel({ session, datasets, onRunStarted, selectedRun, onTogg
   }
 
   const onSummary = (content: string, run_id: string) => setLocal((l) => [...l, { role: "assistant", content, run_id }]);
-  const canRun = !!text.trim() && datasets.length > 0;
+  // engine runs follow a fixed recipe, so they need no description; the agents do
+  const needsText = engines.includes("agents");
+  const canRun = (!!text.trim() || !needsText) && datasets.length > 0 && engines.length > 0;
+  const prompt = () => text.trim() || `Refine the lattice parameters with ${engines.map((e) => engineList.data?.find((x) => x.name === e)?.label ?? e).join(" and ")}`;
 
   return (
     <div className="flex h-full flex-col bg-surface">
@@ -88,12 +97,33 @@ export function ChatPanel({ session, datasets, onRunStarted, selectedRun, onTogg
             )}
           </div>
         </div>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-medium text-muted">Analyse with</span>
+          {(engineList.data ?? []).map((e) => {
+            const on = engines.includes(e.name);
+            return (
+              <button key={e.name} disabled={!e.available} title={e.available ? e.about : e.reason}
+                onClick={() => setEngines((s) => (on ? s.filter((x) => x !== e.name) : [...s, e.name]))}
+                className={cn("rounded border px-1.5 py-px text-[11px] disabled:opacity-40",
+                  on ? "border-accent bg-accent-soft font-medium text-accent" : "border-line-strong text-muted hover:text-ink")}>
+                {e.label}</button>
+            );
+          })}
+          {engines.length > 1 && <span className="text-[10.5px] text-muted">one run each, compared side by side</span>}
+        </div>
+        {(engineList.data ?? []).filter((e) => !e.available && e.tool).map((e) => (
+          <div key={e.name} className="mb-1.5 flex items-center gap-2 text-[11px] text-muted">
+            <span>{e.label} is not installed ({e.install?.license}, {e.install?.size})</span>
+            {e.install?.status === "installing" ? <span className="text-accent">{e.install.message}</span>
+              : <button className="text-accent hover:underline" disabled={!!installing} onClick={() => installEngine(e.tool!)}>Install</button>}
+            {e.install?.status === "failed" && <span className="text-bad" title={e.install.message}>install failed</span>}
+          </div>))}
         <div className="rounded-md border border-line-strong focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/15">
           <textarea className="block h-24 w-full resize-none rounded-t-md bg-transparent p-2.5 text-[13px] leading-5 outline-none placeholder:text-faint"
             value={text} placeholder={`Describe the analysis, e.g. “${EXAMPLE}”`}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canRun) { e.preventDefault(); start({ prompt: text.trim(), dataset_ids: datasets, parent_run_id: null }); setText(""); }
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canRun) { e.preventDefault(); start({ prompt: prompt(), dataset_ids: datasets, parent_run_id: null }); setText(""); }
             }} />
           <div className="flex items-center justify-between border-t border-line px-2 py-1.5">
             <button className="text-[11px] text-muted hover:text-ink" onClick={() => setText(EXAMPLE)}>Use example</button>
@@ -101,8 +131,9 @@ export function ChatPanel({ session, datasets, onRunStarted, selectedRun, onTogg
               <Button size="sm" variant="ghost" disabled={busy || !text.trim()} onClick={ask}
                 title="Discuss with the assistant without starting a run">{busy ? "Answering…" : "Ask assistant"}</Button>
               <Button size="sm" variant="primary" disabled={!canRun}
-                title={datasets.length ? "Start the analysis (Ctrl+Enter)" : "Select at least one dataset first"}
-                onClick={() => { start({ prompt: text.trim(), dataset_ids: datasets, parent_run_id: null }); setText(""); }}>
+                title={!datasets.length ? "Select at least one dataset first" : !engines.length ? "Pick at least one engine"
+                  : needsText && !text.trim() ? "Describe the analysis for the agents" : "Start the analysis (Ctrl+Enter)"}
+                onClick={() => { start({ prompt: prompt(), dataset_ids: datasets, parent_run_id: null }); setText(""); }}>
                 Start analysis <CornerDownLeft size={12} className="opacity-70" />
               </Button>
             </div>

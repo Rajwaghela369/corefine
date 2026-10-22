@@ -1,8 +1,9 @@
 """VASP (plane waves + PAW): POSCAR, KPOINTS, INCAR, and POTCAR when the user's licensed POTCARs are configured.
 
-POTCARs are licensed and are never downloaded or shipped. With VASP_PP_PATH set (the same convention
-ASE and pymatgen use: <VASP_PP_PATH>/potpaw_PBE/<El>/POTCAR) the POTCAR is assembled; otherwise the
-other three files are written and the POTCAR check is reported as not done, with the reason.
+POTCARs are licensed and are never downloaded or shipped. With VASP_PP_PATH set (ASE's convention:
+<VASP_PP_PATH>/potpaw_PBE/<El>/POTCAR for GGA, <VASP_PP_PATH>/potpaw/<El>/POTCAR for LDA) the POTCAR is
+assembled; otherwise the other three files are written and the POTCAR check is reported as not done.
+LDA has no GGA tag: VASP then takes the functional from the POTCAR (LEXCH = CA in the LDA set).
 
 INCAR carries only what the request asks for (functional); ENCUT, PREC, smearing and convergence are
 left to VASP's defaults, which then depend on the POTCAR (ENCUT defaults to the largest ENMAX).
@@ -20,10 +21,28 @@ from app.dft.codes.base import CodeAdapter, ReadBack, Results
 from app.dft.request import CalcRequest
 from app.dft.structure import Cell
 
-# GGA tag values (VASP wiki: GGA); both use the PBE PAW set
-GGA = {"PBE": "PE", "PBEsol": "PS"}
-POTCAR_SET = {"PBE": "potpaw_PBE", "PBEsol": "potpaw_PBE"}
+# GGA tag values (VASP wiki: GGA); PBE and PBEsol use the PBE PAW set. LDA: no GGA tag, LDA PAW set.
+GGA = {"PBE": "PE", "PBEsol": "PS", "LDA": None}
+POTCAR_SET = {"PBE": "potpaw_PBE", "PBEsol": "potpaw_PBE", "LDA": "potpaw"}
+LEXCH = {"potpaw_PBE": "PE", "potpaw": "CA"}  # functional the POTCAR set was generated with
 EV_PER_HA = 27.211386245988
+
+
+def outcar_gap(text: str) -> float | None:
+    """Lowest empty minus highest occupied band energy over all k-points of the last eigenvalue listing in OUTCAR
+    ("band No.  band energies  occupation" blocks). Occupations above half of the maximum count as occupied."""
+    last = text.rsplit("E-fermi", 1)
+    if len(last) < 2:
+        return None
+    rows = re.findall(r"(?m)^\s+\d+\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)\s*$", last[1].split("-" * 40)[0])
+    if not rows:
+        return None
+    occ_max = max(float(o) for _, o in rows)
+    occupied = [float(e) for e, o in rows if float(o) > occ_max / 2]
+    empty = [float(e) for e, o in rows if float(o) <= occ_max / 2]
+    if not occupied or not empty:
+        return None
+    return max(0.0, min(empty) - max(occupied))
 
 
 class VaspAdapter(CodeAdapter):
@@ -36,7 +55,7 @@ class VaspAdapter(CodeAdapter):
         return True, "inputs without POTCAR (licensed; set VASP_PP_PATH to assemble it)"
 
     def functionals(self) -> dict[str, str]:
-        return GGA
+        return {f: (f"GGA = {g}" if g else "no GGA tag; LDA POTCARs") for f, g in GGA.items()}
 
     def problems(self, req: CalcRequest) -> list[str]:
         from app.config import get_settings
@@ -53,7 +72,7 @@ class VaspAdapter(CodeAdapter):
         species = list(dict.fromkeys(sorted(atoms.get_chemical_symbols())))
         k = " ".join(map(str, req.kmesh))
         (outdir / "KPOINTS").write_text(f"Gamma-centred {k} mesh\n0\nGamma\n {k}\n 0 0 0\n")
-        incar = f"SYSTEM = {title}\nGGA = {GGA[req.functional]}\n"
+        incar = f"SYSTEM = {title}\n" + (f"GGA = {GGA[req.functional]}\n" if GGA[req.functional] else "")
         (outdir / "INCAR").write_text(incar)
         potcar = {"assembled": False, "reason": "VASP_PP_PATH not set (POTCARs are licensed)", "species": species}
         if s.VASP_PP_PATH and s.VASP_PP_PATH.is_dir():
@@ -73,7 +92,8 @@ class VaspAdapter(CodeAdapter):
                     enmax = max(float(x) for x in re.findall(r"ENMAX\s*=\s*([\d.]+)", "".join(parts)))
                     (outdir / "INCAR").write_text(incar + f"ENCUT = {enmax * req.basis_scale:.1f}\n")
         return {"files": sorted(f.name for f in outdir.iterdir()),
-                "set_explicitly": {"GGA": GGA[req.functional], "KPOINTS": f"Gamma-centred {k}"},
+                "set_explicitly": {"GGA": GGA[req.functional] or f"not set ({req.functional}: functional from the POTCAR)",
+                                   "POTCAR set": POTCAR_SET[req.functional], "KPOINTS": f"Gamma-centred {k}"},
                 "defaults": {"source": "VASP defaults (VASP wiki); ENCUT follows the POTCAR's largest ENMAX",
                              "values": {"ENCUT": "max ENMAX of POTCAR", "PREC": "Normal", "ISMEAR": 1, "SIGMA": 0.2,
                                         "EDIFF": "1E-4", "NELM": 60}},
@@ -92,11 +112,16 @@ class VaspAdapter(CodeAdapter):
             titel = re.findall(r"TITEL\s*=\s*\S+\s+(\w+)", potcar.read_text())
             want = list(dict.fromkeys(atoms.get_chemical_symbols()))
             extra.append({"check": "POTCAR species match POSCAR order", "ok": titel == want, "detail": f"POTCAR {titel}, POSCAR {want}"})
+            lexch = re.findall(r"LEXCH\s*=\s*(\w+)", potcar.read_text())
+            want_x = LEXCH[POTCAR_SET[req.functional]]
+            extra.append({"check": f"POTCAR functional (LEXCH) is {want_x}", "ok": bool(lexch) and set(lexch) == {want_x},
+                          "detail": f"LEXCH {sorted(set(lexch))}"})
         else:
             extra.append({"check": "POTCAR assembled", "ok": None,
                           "detail": "not assembled: POTCARs are licensed; set VASP_PP_PATH to include them"})
         got = gga.group(1) if gga else None
-        return ReadBack(atoms=atoms, kmesh=kmesh, functional_ok=got == GGA[req.functional], functional_detail=f"GGA={got}",
+        return ReadBack(atoms=atoms, kmesh=kmesh, functional_ok=got == GGA[req.functional],
+                        functional_detail=f"GGA={got}" + ("" if GGA[req.functional] else " (LDA: no GGA tag expected)"),
                         extra_checks=extra)
 
     def run_args(self, outdir: Path) -> dict:
@@ -114,5 +139,5 @@ class VaspAdapter(CodeAdapter):
         converged = "aborting loop because EDIFF is reached" in text
         warnings = [] if converged else ["electronic loop did not report reaching EDIFF"]
         return Results(converged=converged, total_energy_eV=float(toten[-1]) if toten else None,
-                       fermi_eV=float(efermi[-1]) if efermi else None, gap_eV=None, scf_iterations=steps or None,
+                       fermi_eV=float(efermi[-1]) if efermi else None, gap_eV=outcar_gap(text), scf_iterations=steps or None,
                        warnings=warnings, raw={"NELM": int(nelm.group(1)) if nelm else None})

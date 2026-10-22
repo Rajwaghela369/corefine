@@ -1,0 +1,8 @@
+id: cod-1000057-lab6
+role: reference_structure
+technique: xrd_powder
+material: LaB6
+format: cif
+files: [raw/1000057.cif]
+source: https://www.crystallography.net/cod/1000057.html
+license: null                 # not verified for this entry; check the COD terms before redistribution

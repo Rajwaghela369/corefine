@@ -5,3 +5,4 @@ material: Si
 format: cif
 files: [raw/9008565.cif]
 source: https://www.crystallography.net/cod/9008565.html
+license: null                 # not verified for this entry; check the COD terms before redistribution

@@ -16,6 +16,8 @@ export function RunsList({ selected, onSelect }: { selected: string | null; onSe
             className={cn("w-full px-4 py-2.5 text-left hover:bg-subtle", selected === r.id && "bg-accent-soft hover:bg-accent-soft")}>
             <div className="flex items-center gap-2">
               <span className="font-mono text-[11.5px] font-medium">{r.id}</span>
+              {r.engine && r.engine !== "agents" && <span className="rounded bg-subtle px-1 text-[10.5px] text-ink-2">{r.engine === "gsas2" ? "GSAS-II" : "MAUD"}</span>}
+              {r.group_id && <span className="text-[10.5px] text-muted" title={r.group_id}>compared</span>}
               <span className="ml-auto"><Status status={r.status} /></span>
             </div>
             <p className="mt-0.5 line-clamp-1 text-xs text-ink-2">{r.prompt}</p>

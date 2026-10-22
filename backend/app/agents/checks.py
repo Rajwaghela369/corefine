@@ -89,6 +89,13 @@ def comparison_metrics(metrics: list[Metric], reference: dict, target_A: float) 
     if a.uncertainty:
         out.append(Metric(name="difference_in_sigma", value=diff / a.uncertainty, unit="sigma", uncertainty=None,
                           method="difference / a_refined uncertainty"))
+    c, cert_c = _metric(metrics, "c_refined"), reference.get("c_A")  # hexagonal and tetragonal cells
+    if c is not None and cert_c is not None and isinstance(c.value, (int, float)):
+        dc = float(c.value) - float(cert_c)
+        out += [Metric(name="c_certified", value=float(cert_c), unit="angstrom", uncertainty=reference.get("c_uncertainty_A"),
+                       method=f"manifest reference_values ({reference.get('source', 'certificate')})"),
+                Metric(name="c_difference_from_certified", value=dc, unit="angstrom", uncertainty=c.uncertainty,
+                       method="c_refined - c_certified (computed by orchestrator)")]
     return out
 
 

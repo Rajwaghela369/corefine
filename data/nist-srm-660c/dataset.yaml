@@ -1,0 +1,23 @@
+id: nist-srm-660c
+role: measured_pattern
+technique: xrd_powder
+material: LaB6
+format: pdcif
+files: [raw/*.cif]
+instrument:
+  radiation: CuKa             # file: _diffrn_radiation_type 'Cu K\a'; post-specimen graphite analyzer, no incident-beam monochromator
+  wavelength_A: 1.5405929     # Cu Kα1. NOT in the CIFs; from NIST SRM 660c certificate, Table 1 (λ = 0.154 059 29 nm)
+  wavelength_source: "NIST SRM 660c certificate (29 Oct 2015), Table 1"
+  ka2_present: true           # no Johansson monochromator: fit Kα1/Kα2 doublets, not single peaks
+  ka2_wavelength_A: null      # not stated in the certificate; NIST modelled the Cu Kα spectrum after Hölzer et al. (certificate ref. 10)
+  goniometer_radius_mm: 217.5 # file: _pd_instr_dist_spec/detc
+temperature_C: null
+temperature_note: "per scan in the file: _pd_spec_temperature (20.85 °C in all 20 scans)"
+source: https://doi.org/10.18434/mds2-2315
+license: "NIST open license (https://www.nist.gov/open/license)"   # from the NIST data record of mds2-2315
+sha256_zip: 92034d06498161db365420831fe35d91ec18bad4ed17385329a1761658da2c42
+reference_values:             # visible to the Analyst and claim checker only, never to the Coder
+  a_A: 4.156826
+  a_uncertainty_A: 0.00008    # certificate: ± 0.000 008 nm, k = 2
+  a_reference_temperature_C: 22.5
+  source: "NIST SRM 660c certificate (29 Oct 2015), page 1"

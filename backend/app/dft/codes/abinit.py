@@ -9,6 +9,7 @@ ABINIT requires an SCF stopping criterion and has no default: tolvrs 1e-10 is Co
 """
 
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -26,6 +27,11 @@ from app.dft.structure import Cell
 PSPXC = {11: "PBE", -101130: "PBE", -116133: "PBEsol", 7: "LDA", -1012: "LDA"}
 TOLVRS = "1.0d-10"
 METAL = {"occopt": 7, "tsmear": 0.01}  # Gaussian-like smearing, 0.01 Ha: CoRefine's choice, only when requested
+
+
+def zion_of(psp8: Path) -> float:
+    """Valence charge: second number on line 2 of a psp8 file (zatom, zion, pspd)."""
+    return float(psp8.read_text(errors="replace").splitlines()[1].split()[1])
 
 
 def pspxc_of(psp8: Path) -> int | None:
@@ -48,13 +54,13 @@ class AbinitAdapter(CodeAdapter):
         return tools.managed_pseudo_dir(functional, kind="pseudodojo")
 
     def availability(self, s: Settings) -> tuple[bool, str]:
-        lib = self.library("PBE")
-        if lib:
-            return True, f"PseudoDojo pseudopotentials installed by CoRefine ({lib.name})"
+        libs = [lib.name for f in ("PBE", "LDA") if (lib := self.library(f))]
+        if libs:
+            return True, f"PseudoDojo pseudopotentials installed by CoRefine ({', '.join(libs)})"
         return False, "no pseudopotentials: install PseudoDojo from the Codes panel"
 
     def functionals(self) -> dict[str, str]:
-        return {"PBE": "from pseudopotentials"}
+        return {"PBE": "from pseudopotentials", "LDA": "from pseudopotentials"}
 
     def problems(self, req: CalcRequest) -> list[str]:
         out = super().problems(req)
@@ -82,13 +88,21 @@ class AbinitAdapter(CodeAdapter):
         lines += ['pp_dirpath "./"', 'pseudos "' + ", ".join(table[el]["basename"] for el in species) + '"',
                   f"ecut {ecut}", "kptopt 1", "ngkpt " + " ".join(map(str, req.kmesh)), "nshiftk 1", "shiftk 0 0 0",
                   f"tolvrs {TOLVRS}", "prtwf 0"]
+        nband = None
         if req.occupations == "smearing":
             lines += [f"occopt {METAL['occopt']}", f"tsmear {METAL['tsmear']}"]
+        else:  # ABINIT's default nband for insulators is the occupied count: add empty bands so the gap can be read
+            nelec = sum(zion_of(lib / table[el]["basename"]) for el in cell.symbols)
+            nocc = math.ceil(nelec / 2)
+            nband = nocc + max(4, math.ceil(0.2 * nocc))
+            lines += [f"nband {nband}"]
         (outdir / "abinit.abi").write_text("\n".join(lines) + "\n")
         return {"files": ["abinit.abi", *(table[el]["basename"] for el in species)],
                 "set_explicitly": {"ngkpt": " ".join(map(str, req.kmesh)) + ", shiftk 0 0 0 (Gamma-centred)",
                                    "functional": f"{req.functional}, via the pseudopotentials",
                                    "tolvrs": f"{TOLVRS} (ABINIT has no default; CoRefine's choice)",
+                                   **({"nband": f"{nband}: occupied + empty bands (20 %, at least 4), so the gap can be read"}
+                                      if nband else {}),
                                    **({"occopt/tsmear": "7 / 0.01 Ha (CoRefine's choice)"} if req.occupations == "smearing" else {})},
                 "defaults": {"source": "PseudoDojo hints (ecut) and ABINIT defaults",
                              "values": {"ecut_Ha": ecut, "ecut_source": f"largest PseudoDojo 'normal' hint x{req.basis_scale}",
@@ -138,6 +152,24 @@ class AbinitAdapter(CodeAdapter):
     def run_args(self, outdir: Path) -> dict:
         return {"program": self.program, "args": ["abinit.abi"], "stdout": "abinit.log"}
 
+    @staticmethod
+    def gap(rundir: Path, abo: str) -> float | None:
+        """Lowest empty minus highest occupied eigenvalue over the k-mesh, from abinito_EIG (fixed occupations only;
+        the .abo prints no gap). None for smearing runs or when there are no empty bands."""
+        occ = re.search(r"occopt:\s*([\d.Ee+-]+)", abo)
+        nel = re.search(r"nelect:\s*([\d.Ee+-]+)", abo)
+        eig = rundir / "abinito_EIG"
+        if not (occ and nel and eig.is_file()) or int(float(occ.group(1))) != 1:
+            return None
+        nocc = round(float(nel.group(1))) // 2
+        homo, lumo = [], []
+        for block in re.split(r"kpt#\s*\d+,", eig.read_text())[1:]:
+            vals = [float(v) for v in re.findall(r"[-]?\d+\.\d+", block.split("\n", 1)[1])]
+            if len(vals) > nocc:
+                homo.append(vals[nocc - 1])
+                lumo.append(vals[nocc])
+        return (min(lumo) - max(homo)) * Hartree if homo else None
+
     def parse_results(self, rundir: Path) -> Results | None:
         abo = rundir / "abinit.abo"
         if not abo.is_file():
@@ -148,7 +180,7 @@ class AbinitAdapter(CodeAdapter):
         ef = re.findall(r"Fermi \(or HOMO\) energy \(hartree\)\s*=\s*([-\d.]+)", text)
         not_conv = "not enough SCF cycles to converge" in text
         return Results(converged=bool(conv) and not not_conv, total_energy_eV=float(e[-1]) * Hartree if e else None,
-                       fermi_eV=float(ef[-1]) * Hartree if ef else None, gap_eV=None,
+                       fermi_eV=float(ef[-1]) * Hartree if ef else None, gap_eV=self.gap(rundir, text),
                        scf_iterations=int(conv[-1]) if conv else None,
                        warnings=[] if conv and not not_conv else ["ABINIT did not report SCF convergence"],
                        raw={"etotal_Ha": float(e[-1]) if e else None})

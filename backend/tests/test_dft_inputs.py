@@ -33,7 +33,7 @@ def test_standard_primitive_si():
 
 def test_request_refusals(monkeypatch):
     assert "no structure source" in CalcRequest().unsupported()[0]
-    assert REGISTRY["questaal"].problems(CalcRequest(structure="x.cif", functional="LDA"))
+    assert REGISTRY["abinit"].problems(CalcRequest(structure="x.cif", functional="PBEsol"))  # no PBEsol table mapped
     assert not REGISTRY["exciting"].problems(CalcRequest(structure="x.cif", functional="LDA"))
     with pytest.raises(RequestError, match="no structure source"):
         prepare(CalcRequest(), get_settings().LOCAL_DATA_DIR / "nope")

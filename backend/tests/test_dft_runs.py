@@ -91,7 +91,8 @@ def test_vasp_without_potcar_is_marked_not_done(tmp_path, monkeypatch):
 def test_vasp_assembles_potcar_when_configured(tmp_path, monkeypatch):
     pp = tmp_path / "pp" / "potpaw_PBE" / "Si"
     pp.mkdir(parents=True)
-    (pp / "POTCAR").write_text("  PAW_PBE Si 05Jan2001\n   TITEL  = PAW_PBE Si 05Jan2001\n   ENMAX  =  245.345\n End of Dataset\n")
+    (pp / "POTCAR").write_text("  PAW_PBE Si 05Jan2001\n   TITEL  = PAW_PBE Si 05Jan2001\n   LEXCH  = PE\n   ENMAX  =  245.345\n"
+                               " End of Dataset\n")
     monkeypatch.setattr(get_settings(), "VASP_PP_PATH", tmp_path / "pp")
     v = REGISTRY["vasp"]
     req = CalcRequest(structure="x", codes=["vasp"])

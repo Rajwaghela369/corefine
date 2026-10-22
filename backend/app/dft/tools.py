@@ -5,6 +5,9 @@ Everything goes into TOOLS_DIR (no root, no system changes) and is verified befo
   qe           Quantum ESPRESSO from conda-forge, in its own environment (GPL-2.0)
   sssp-*       SSSP pseudopotential libraries from the Materials Cloud Archive (CC-BY 4.0), MD5 checked
                against the archive's own file listing; their JSON carries the recommended cutoffs
+  pseudodojo-* PseudoDojo norm-conserving tables (ABINIT), MD5 checked against standard.djson
+  jth-lda      JTH v1.1 LDA PAW datasets as UPF (QE has no SSSP for LDA); cutoff hints from the JTH table's
+               standard.djson, written into an SSSP-style JSON so the QE adapter reads them the same way
 
 Commercial codes (VASP) cannot be installed here; their inputs are still generated.
 Install state is kept in TOOLS_DIR/tools.json; each install runs in the background with a log.
@@ -59,6 +62,26 @@ RECIPES: dict[str, dict] = {
     "pseudodojo-pbe": {"label": "PseudoDojo NC PBE v0.4 (standard)", "kind": "pseudodojo", "repo": "ONCVPSP-PBE-PDv0.4",
                        "branch": "master", "functional": "PBE", "license": "CC-BY 4.0", "size": "about 10 MB",
                        "source": "github.com/PseudoDojo/ONCVPSP-PBE-PDv0.4 (standard.djson: files, MD5, cutoff hints)"},
+    "pseudodojo-lda": {"label": "PseudoDojo NC LDA v0.4 (standard)", "kind": "pseudodojo", "repo": "ONCVPSP-LDA-PDv0.4",
+                       "branch": "main", "functional": "LDA", "license": "CC-BY 4.0", "size": "about 10 MB",
+                       "source": "github.com/PseudoDojo/ONCVPSP-LDA-PDv0.4 (standard.djson: files, MD5, cutoff hints)"},
+    # XRD refinement engines
+    "gsas2": {"label": "GSAS-II (Rietveld refinement)", "kind": "gsas2", "repo": "https://github.com/AdvancedPhotonSource/GSAS-II.git",
+              "commit": "a39f978abcd66cc234a170f11837578e87d3bf11",
+              "specs": ["python=3.13", "numpy", "scipy", "pycifrw", "meson-python", "ninja", "cython", "pkg-config",
+                        "c-compiler", "fortran-compiler", "git", "pip"],
+              "provides": {"gsas2": "bin/python"}, "license": "GSAS-II licence (free, open source)", "size": "about 1 GB",
+              "source": "github.com/AdvancedPhotonSource/GSAS-II, built from a pinned commit (not on PyPI or conda-forge)"},
+    "maud": {"label": "MAUD (Rietveld and microstructure)", "kind": "release", "repo": "luttero/Maud", "tag": "v3.08",
+             "assets": {"linux-64": "Maud_linux_x64.tar.gz", "linux-aarch64": "Maud_linux_aarch64.tar.gz"},
+             "provides": {"maud": "Maud/jdk/bin/java"}, "license": "BSD-3-Clause", "size": "about 300 MB download",
+             "source": "github.com/luttero/Maud release v3.08 (bundled Java), SHA-256 from GitHub's release record"},
+    # PseudoDojo's LDA v0.4 table has psp8 files but almost no UPF, so QE gets the JTH PAW table instead
+    "jth-lda": {"label": "JTH v1.1 LDA PAW datasets (UPF, for Quantum ESPRESSO)", "kind": "jth", "repo": "ATOMPAW-LDA-JTHv1.1",
+                "branch": "main", "functional": "LDA", "license": "GPL-3.0", "size": "about 60 MB",
+                "index": "https://raw.githubusercontent.com/abinit/paw_jth_datasets/main/pseudos/JTH-LDA-v1.1/standard.djson",
+                "source": "UPF files from github.com/PseudoDojo/ATOMPAW-LDA-JTHv1.1; cutoff hints from "
+                          "github.com/abinit/paw_jth_datasets (JTH-LDA-v1.1/standard.djson)"},
 }
 NOT_INSTALLABLE = {"vasp": "VASP is commercial software; CoRefine cannot install it. Inputs are still generated.",
                    "exciting": "exciting is open source but not packaged on conda-forge; build it from "
@@ -107,16 +130,17 @@ def managed_executable(code: str) -> Path | None:
     for name, r in RECIPES.items():
         rel = r.get("provides", {}).get(code)
         if rel and installed(name):
-            p = tools_dir() / "envs" / name / rel
+            p = tools_dir() / ("apps" if r["kind"] == "release" else "envs") / name / rel
             if p.is_file():
                 return p
     return None
 
 
-def managed_pseudo_dir(functional: str, kind: str = "sssp") -> Path | None:
-    """Installed pseudopotential library for a functional: kind 'sssp' (QE) or 'pseudodojo' (ABINIT, norm-conserving)."""
+def managed_pseudo_dir(functional: str, kind: str | tuple[str, ...] = ("sssp", "jth")) -> Path | None:
+    """Installed pseudopotential library for a functional: kinds 'sssp'/'jth' (QE, UPF) or 'pseudodojo' (ABINIT, psp8)."""
+    kinds = (kind,) if isinstance(kind, str) else kind
     for name, r in RECIPES.items():
-        if r["kind"] == kind and r["functional"] == functional and installed(name):
+        if r["kind"] in kinds and r["functional"] == functional and installed(name):
             d = tools_dir() / "pseudos" / (r.get("file") or r["repo"])
             if d.is_dir():
                 return d
@@ -147,6 +171,12 @@ def _install(name: str) -> None:
             version = _install_conda(name, r, log)
         elif r["kind"] == "pseudodojo":
             version = _install_pseudodojo(name, r, log)
+        elif r["kind"] == "jth":
+            version = _install_jth(name, r, log)
+        elif r["kind"] == "gsas2":
+            version = _install_gsas2(name, r, log)
+        elif r["kind"] == "release":
+            version = _install_release(name, r, log)
         else:
             version = _install_sssp(name, r, log)
         _set(name, status="installed", message="ready", version=version, finished=now())
@@ -289,3 +319,107 @@ def _install_pseudodojo(name: str, r: dict, log: Path) -> str:
                 raise ToolError(f"{m['basename']}: MD5 mismatch with standard.djson")
             target.write_bytes(data)
     return f"{r['repo']} standard ({len(meta)} elements)"
+
+
+HA_TO_RY = 2.0
+
+
+def _install_jth(name: str, r: dict, log: Path) -> str:
+    """UPF per element from the PseudoDojo mirror of the JTH table, plus a cutoff table from the JTH standard.djson.
+
+    The djson hints are ABINIT plane-wave cutoffs in Ha; pw.x takes Ry, so ecutwfc = 2 x hint. ecutrho is left
+    out, so the QE adapter uses pw.x's own default (4 x ecutwfc). Elements without a hint get no entry, and the
+    adapter then refuses them instead of guessing. The djson MD5s are for the XML files, not the UPFs, so no
+    MD5 is claimed; the SHA-256 of each downloaded UPF is recorded instead.
+    """
+    _set(name, message="downloading the JTH index (standard.djson)")
+    resp = httpx.get(r["index"], follow_redirects=True, timeout=60)
+    if resp.status_code != 200:
+        raise ToolError(f"JTH index: HTTP {resp.status_code}")
+    meta = resp.json()["pseudo_metadata"]
+    dest = tools_dir() / "pseudos" / r["repo"]
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "jth_standard.djson").write_bytes(resp.content)
+    table = {}
+    with httpx.Client(follow_redirects=True, timeout=60) as client:
+        for i, (el, m) in enumerate(sorted(meta.items()), 1):
+            fname = f"{el}.LDA-PW-paw.UPF"
+            target = dest / fname
+            if not target.is_file():
+                _set(name, message=f"downloading {fname} ({i}/{len(meta)})")
+                resp = client.get(GITHUB_RAW.format(repo=r["repo"], branch=r["branch"], path=f"{el}/{fname}"))
+                if resp.status_code != 200:
+                    continue  # not in the UPF mirror; the element stays unavailable for QE
+                if b"<PP_HEADER" not in resp.content[:20000]:
+                    raise ToolError(f"{fname} is not a UPF v2 file")
+                target.write_bytes(resp.content)
+            hint = (m.get("hints") or {}).get("normal", {}).get("ecut")
+            if hint:
+                table[el] = {"filename": fname, "cutoff_wfc": HA_TO_RY * float(hint), "cutoff_rho": None, "md5": None,
+                             "sha256_downloaded": hashlib.sha256(target.read_bytes()).hexdigest(),
+                             "cutoff_source": f"JTH-LDA-v1.1 standard.djson hint {hint} Ha (normal) x 2 Ry/Ha"}
+    (dest / "JTH_LDA_v1.1_cutoffs.json").write_text(json.dumps(table, indent=1))
+    n = len(list(dest.glob("*.UPF")))
+    if n < 50:
+        raise ToolError(f"only {n} UPF files downloaded")
+    return f"{r['repo']} ({n} elements, {len(table)} with cutoff hints)"
+
+
+def _install_gsas2(name: str, r: dict, log: Path) -> str:
+    """GSAS-II is not packaged; its own build (meson + gfortran) runs in a conda-forge environment from a pinned commit."""
+    prefix = tools_dir() / "envs" / name
+    mm = micromamba(log)
+    env = {**os.environ, "MAMBA_ROOT_PREFIX": str(tools_dir() / "mamba-root")}
+    with open(log, "a") as lg:
+        if not (prefix / "bin" / "python").is_file():
+            _set(name, message="creating the build environment (compilers, numpy, scipy)")
+            p = subprocess.run([str(mm), "create", "-y", "-p", str(prefix), "-c", "conda-forge", "--override-channels", *r["specs"]],
+                               stdout=lg, stderr=subprocess.STDOUT, env=env, timeout=3600)
+            if p.returncode != 0:
+                raise ToolError(f"micromamba exited {p.returncode}; see {log}")
+        src = tools_dir() / "src" / "GSAS-II"
+        if not (src / ".git").is_dir():
+            _set(name, message="downloading the GSAS-II source")
+            subprocess.run(["git", "clone", "-q", r["repo"], str(src)], stdout=lg, stderr=subprocess.STDOUT, check=True, timeout=1800)
+        subprocess.run(["git", "-C", str(src), "fetch", "-q", "origin", r["commit"]], stdout=lg, stderr=subprocess.STDOUT, timeout=600)
+        subprocess.run(["git", "-C", str(src), "checkout", "-q", r["commit"]], stdout=lg, stderr=subprocess.STDOUT, check=True)
+        _set(name, message="compiling GSAS-II (a few minutes)")
+        p = subprocess.run([str(mm), "run", "-p", str(prefix), "pip", "install", "--no-build-isolation", str(src)],
+                           stdout=lg, stderr=subprocess.STDOUT, env=env, timeout=3600)
+        if p.returncode != 0:
+            raise ToolError(f"GSAS-II build failed; see {log}")
+        p = subprocess.run([str(prefix / "bin" / "python"), "-c", "from GSASII import GSASIIscriptable"],
+                           stdout=lg, stderr=subprocess.STDOUT, timeout=300)
+        if p.returncode != 0:
+            raise ToolError(f"GSAS-II built but GSASIIscriptable does not import; see {log}")
+    return f"GSAS-II {r['commit'][:10]}"
+
+
+def _install_release(name: str, r: dict, log: Path) -> str:
+    """A GitHub release asset, checked against the SHA-256 GitHub records for it, unpacked under TOOLS_DIR/apps."""
+    asset = r["assets"].get(_platform())
+    if not asset:
+        raise ToolError(f"{r['label']}: no release build for {platform.system()} {platform.machine()} that runs headless")
+    rel = httpx.get(f"https://api.github.com/repos/{r['repo']}/releases/tags/{r['tag']}", timeout=60).json()
+    meta = next((a for a in rel.get("assets", []) if a["name"] == asset), None)
+    if not meta or not str(meta.get("digest", "")).startswith("sha256:"):
+        raise ToolError(f"{asset}: no SHA-256 in the GitHub release record; not installed")
+    tmp = tools_dir() / "downloads"
+    tmp.mkdir(exist_ok=True)
+    f = tmp / asset
+    if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest() != meta["digest"].removeprefix("sha256:"):
+        _set(name, message=f"downloading {asset}")
+        _download(meta["browser_download_url"], f, log)
+    got = hashlib.sha256(f.read_bytes()).hexdigest()
+    if got != meta["digest"].removeprefix("sha256:"):
+        raise ToolError(f"{asset}: SHA-256 mismatch ({got})")
+    dest = tools_dir() / "apps" / name
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    _set(name, message="unpacking")
+    with tarfile.open(f) as tar:
+        tar.extractall(dest, filter="data", members=[m for m in tar.getmembers() if "/._" not in "/" + m.name])
+    for rel_path in r["provides"].values():
+        if not (dest / rel_path).is_file():
+            raise ToolError(f"{rel_path} missing after unpacking")
+    return f"{r['repo'].split('/')[-1]} {r['tag']}"

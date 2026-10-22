@@ -21,8 +21,12 @@ from app.dft.request import CalcRequest
 from app.dft.structure import Cell, spacegroup_operations
 
 # blm switches from `blm --h`; libxc ids it writes into xcfun, checked in libxc 6.2.2 xc_funcs.h
-XC_SWITCH = {"PBE": "--pbe", "PBEsol": "--pbesol"}
-LIBXC_IDS = {"PBE": (101, 130), "PBEsol": (116, 133)}
+# blm has no LDA switch, and without one lmf uses its built-in Barth-Hedin LDA (suctrl.f: xcfun=2), not the
+# Perdew-Wang 92 LDA the other codes use. For LDA blm writes the PBE line, which is then replaced by the libxc
+# ids of Slater exchange + PW92 correlation (XC_LDA_X = 1, XC_LDA_C_PW = 12).
+XC_SWITCH = {"PBE": "--pbe", "PBEsol": "--pbesol", "LDA": "--pbe"}
+XCFUN_EDIT = {"LDA": ("0,101,130", "0,1,12")}
+LIBXC_IDS = {"PBE": (101, 130), "PBEsol": (116, 133), "LDA": (1, 12)}
 TIMEOUT_S = 180
 EV_PER_RY = 13.605693122994
 
@@ -106,7 +110,7 @@ class QuestaalAdapter(CodeAdapter):
         return True, f"binaries in {s.QUESTAAL_BIN}"
 
     def functionals(self) -> dict[str, str]:
-        return XC_SWITCH
+        return {**XC_SWITCH, "LDA": "xcfun=0,1,12 (libxc LDA_X + LDA_C_PW) in ctrl"}
 
     def write(self, cell: Cell, req: CalcRequest, outdir: Path, s: Settings, title: str) -> dict:
         outdir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +138,13 @@ class QuestaalAdapter(CodeAdapter):
             steps[name] = {"command": " ".join(args), "exit_code": p.returncode}
             if p.returncode != 0:
                 raise QuestaalSetupError(f"{name} failed (exit {p.returncode}); see {name}.log:\n{(p.stderr or p.stdout)[-800:]}")
+            if name == "blm" and req.functional in XCFUN_EDIT:
+                ctrl = outdir / f"ctrl.{ext}"
+                old, new = XCFUN_EDIT[req.functional]
+                text, n = re.subn(rf"(xcfun=\s*){re.escape(old)}\b", rf"\g<1>{new}", ctrl.read_text())
+                if not n:
+                    raise QuestaalSetupError(f"blm wrote no 'xcfun= {old}' line to replace for {req.functional}")
+                ctrl.write_text(text)
             if name == "blm" and radii:
                 ctrl = outdir / f"ctrl.{ext}"
                 text = ctrl.read_text()
@@ -144,6 +155,8 @@ class QuestaalAdapter(CodeAdapter):
                 gmax = set_gmax_from_lmfa(outdir, ext, p.stdout, req.basis_scale)
         return {"files": sorted(f.name for f in outdir.iterdir() if f.is_file()),
                 "set_explicitly": {"functional switch": XC_SWITCH[req.functional], "nk": nk,
+                                   **({"xcfun": f"{XCFUN_EDIT[req.functional][1]} (libxc LDA_X + LDA_C_PW, edited into ctrl)"}
+                                      if req.functional in XCFUN_EDIT else {}),
                                    **({"sphere radii": f"touching at volume x{req.sphere_ref_scale}: {radii}"} if radii else {}),
                                    **({"gmax": f"x{req.basis_scale ** 0.5:.3f} the lmfa estimate"} if req.basis_scale != 1 else {})},
                 "defaults": {"source": "blm --express (basis, sphere radii); lmfa (gmax)", "values": {"gmax": gmax}},

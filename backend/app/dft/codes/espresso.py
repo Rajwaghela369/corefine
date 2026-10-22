@@ -1,7 +1,7 @@
 """Quantum ESPRESSO (plane waves + pseudopotentials, pw.x): pw.in written with ASE, pseudopotentials copied alongside.
 
 Pseudopotentials come from the user's QE_PSEUDO_DIR (any library: SSSP, pslibrary, ...) or, if unset,
-from the SSSP library CoRefine installs (app/dft/tools.py); nothing is guessed. For each element exactly
+from the library CoRefine installs (app/dft/tools.py): SSSP for PBE/PBEsol, JTH PAW for LDA; nothing is guessed. For each element exactly
 one candidate file must match; with several, the one whose header functional matches the request is
 used, otherwise the request is refused with the list.
 pw.x has no default plane-wave cutoff, so it is taken from (in order) an SSSP-style JSON in the pseudo
@@ -11,6 +11,7 @@ their header functional is the one requested.
 """
 
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -78,7 +79,7 @@ class EspressoAdapter(CodeAdapter):
     program = "pw.x"
 
     def pseudo_dir(self, s: Settings, functional: str) -> Path | None:
-        """Your own QE_PSEUDO_DIR if set, else the SSSP library CoRefine installed for that functional."""
+        """Your own QE_PSEUDO_DIR if set, else the library CoRefine installed for that functional (SSSP or JTH)."""
         if s.QE_PSEUDO_DIR:
             return s.QE_PSEUDO_DIR
         from app.dft import tools
@@ -90,9 +91,9 @@ class EspressoAdapter(CodeAdapter):
             if not s.QE_PSEUDO_DIR.is_dir() or not any(s.QE_PSEUDO_DIR.glob("*.[uU][pP][fF]")):
                 return False, f"no .UPF files in {s.QE_PSEUDO_DIR}"
             return True, f"pseudopotentials from {s.QE_PSEUDO_DIR}"
-        installed = [f for f in ("PBE", "PBEsol") if self.pseudo_dir(s, f)]
+        installed = [f"{f}: {d.name}" for f in ("PBE", "PBEsol", "LDA") if (d := self.pseudo_dir(s, f))]
         if installed:
-            return True, f"SSSP pseudopotentials installed by CoRefine ({', '.join(installed)})"
+            return True, f"pseudopotentials installed by CoRefine ({', '.join(installed)})"
         return False, "no pseudopotentials: install SSSP from the Codes panel, or set QE_PSEUDO_DIR"
 
     def functionals(self) -> dict[str, str]:
@@ -102,7 +103,8 @@ class EspressoAdapter(CodeAdapter):
         from app.config import get_settings
 
         if self.pseudo_dir(get_settings(), req.functional) is None:
-            return [f"Quantum ESPRESSO: no {req.functional} pseudopotentials (install SSSP {req.functional} or set QE_PSEUDO_DIR)"]
+            lib = "JTH LDA" if req.functional == "LDA" else f"SSSP {req.functional}"
+            return [f"Quantum ESPRESSO: no {req.functional} pseudopotentials (install {lib} or set QE_PSEUDO_DIR)"]
         return []
 
     def choose_pseudos(self, elements: list[str], functional: str, pseudo_dir: Path) -> dict[str, Path]:
@@ -145,8 +147,8 @@ class EspressoAdapter(CodeAdapter):
             entry = sssp.get("table", {}).get(el)
             if entry and entry.get("cutoff_wfc"):
                 wfc.append(float(entry["cutoff_wfc"]))
-                rho.append(float(entry.get("cutoff_rho") or 4 * float(entry["cutoff_wfc"])))
-                source = f"SSSP table {sssp['file']}"
+                rho.append(float(entry.get("cutoff_rho") or 4 * float(entry["cutoff_wfc"])))  # 4x = pw.x default dual
+                source = f"cutoff table {sssp['file']}" + ("" if entry.get("cutoff_rho") else "; ecutrho = pw.x default 4 x ecutwfc")
             elif float(h.get("wfc_cutoff") or 0) > 0:
                 wfc.append(float(h["wfc_cutoff"]))
                 rho.append(float(h.get("rho_cutoff") or 4 * float(h["wfc_cutoff"])))
@@ -155,9 +157,16 @@ class EspressoAdapter(CodeAdapter):
                 raise EspressoSetupError(f"no cutoff recommendation for {p.name} (header or SSSP JSON); pw.x has no default")
             shutil.copy2(p, outdir / p.name)
         ecutwfc, ecutrho = max(wfc) * req.basis_scale, max(rho) * req.basis_scale
+        # pw.x computes only occupied bands for insulators, so no gap can be read; add empty bands by pw.x's own rule
+        # for metals (20 % more, at least 4). Smearing runs already get them from pw.x.
+        nelec = sum(float(upf_header(pseudos[el]).get("z_valence", "0").strip() or 0) for el in cell.symbols)
+        nbnd = None
+        if req.occupations != "smearing" and nelec > 0:
+            nocc = math.ceil(nelec / 2)
+            nbnd = nocc + max(4, math.ceil(0.2 * nocc))
         input_data = {"control": {"calculation": "scf", "prefix": "pwscf", "pseudo_dir": "./", "outdir": "./tmp",
                                   "title": title[:70], **({"tprnfor": True} if req.forces else {})},
-                      "system": {"ecutwfc": ecutwfc, "ecutrho": ecutrho,
+                      "system": {"ecutwfc": ecutwfc, "ecutrho": ecutrho, **({"nbnd": nbnd} if nbnd else {}),
                                  **(METAL_SMEARING if req.occupations == "smearing" else {})}}
         with open(outdir / "pw.in", "w") as fd:
             ase_write(fd, cell.atoms, format="espresso-in", input_data=input_data,
@@ -167,6 +176,8 @@ class EspressoAdapter(CodeAdapter):
                 "set_explicitly": {"K_POINTS": f"automatic {' '.join(map(str, req.kmesh))} 0 0 0 (Gamma-centred)",
                                    **({"cutoffs": f"x{req.basis_scale} the recommended ecutwfc/ecutrho"} if req.basis_scale != 1 else {}),
                                    "functional": f"{req.functional}, via the pseudopotentials",
+                                   **({"nbnd": f"{nbnd}: {math.ceil(nelec / 2)} occupied + empty bands (pw.x's rule for metals: "
+                                               "20 %, at least 4), so the gap can be read"} if nbnd else {}),
                                    **({"occupations": SMEARING_NOTE} if req.occupations == "smearing" else {})},
                 "defaults": {"source": f"pw.x defaults; cutoffs from {source}",
                              "values": {"ecutwfc_Ry": ecutwfc, "ecutrho_Ry": ecutrho, "conv_thr": "1e-6 (pw.x default)",

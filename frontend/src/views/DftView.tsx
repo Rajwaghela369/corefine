@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { api, dft, type DftJob, type MpMaterial } from "../api/client";
 import { Button, Empty, Field, PanelHeader, Status, Tag, clock, cn, inputCls, num } from "../components/ui";
 import { RunsPane, livePollInterval, runIsLive } from "./DftRuns";
-import { ConvergencePane, EosPane, RamanPane } from "./DftStudies";
+import { ConvergencePane } from "./DftStudies";
 import { Dot, Sections } from "../components/Sections";
-import { Atom, FileCode, LayoutDashboard, Play, Search, ShieldCheck, Sigma, TrendingDown, Waves } from "lucide-react";
+import { Atom, FileCode, LayoutDashboard, Play, Search, ShieldCheck, Sigma, TrendingDown } from "lucide-react";
 import { Welcome, WelcomeSection } from "../components/Welcome";
 
 type SourceKind = "find" | "storage" | "mp" | "cod" | "upload";
@@ -34,11 +34,11 @@ function DftWelcome({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <Welcome title="Theory: DFT for any material"
       intro="Pick a material from Materials Project. CoRefine plans the calculation, writes inputs for every code below, checks that they all
-        describe the same crystal, runs the codes installed on this machine, and adds convergence, equation-of-state and Raman studies."
+        describe the same crystal, runs the codes installed on this machine and shows what each code finds (band gap, convergence)."
       steps={[
         { icon: Search, title: "Pick a material", text: "Search by formula or elements on the left; the stable phase is listed first." },
         { icon: Play, title: "Plan and run", text: "The plan and its reasons are shown, inputs are checked, and installed codes run one after another." },
-        { icon: Sigma, title: "Study and compare", text: "Converge settings, fit an equation of state across codes, compute Raman lines, compare with experiment." },
+        { icon: Sigma, title: "Read the results", text: "Band gap and convergence per code, next to Materials Project; Theory ↔ Experiment shows how it went." },
       ]}>
       <WelcomeSection title={`Codes (${cfg.data?.codes.length ?? "…"})`}>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -270,7 +270,11 @@ function CodeInstaller() {
     wasInstalling.current = installing;
   }, [installing, qc]);
   const missing = (cfg.data?.codes ?? []).filter((c) => !c.available);
-  if (!t || !missing.length) return null;
+  // usable codes that still lack the library for another functional (e.g. LDA pseudopotentials for QE)
+  const libs = (cfg.data?.codes ?? []).filter((c) => c.available).flatMap((c) =>
+    Object.entries(t?.functional_tools[c.name] ?? {}).map(([xc, names]) => ({ code: c, xc, parts: names.map((n) => byName[n]).filter(Boolean) })))
+    .filter((l) => l.parts.length && l.parts.some((x) => x.status !== "installed"));
+  if (!t || (!missing.length && !libs.length)) return null;
   return (
     <div className="mb-2 space-y-1.5 rounded-md border border-line bg-subtle/60 p-2">
       {missing.map((c) => {
@@ -293,6 +297,23 @@ function CodeInstaller() {
           </div>
         );
       })}
+      {libs.map(({ code, xc, parts }) => {
+        const busy = parts.some((x) => x.status === "installing");
+        const failed = parts.find((x) => x.status === "failed");
+        return (
+          <div key={`${code.name}-${xc}`} className="text-[11px] leading-4">
+            <div className="flex items-center justify-between gap-2">
+              <span><span className="font-medium text-ink-2">{code.label}</span> <span className="text-muted">{xc} needs its own pseudopotentials</span></span>
+              <Button size="sm" variant="secondary" disabled={busy || install.isPending}
+                onClick={() => install.mutate(parts.filter((x) => x.status !== "installed").map((x) => x.name))}>
+                {busy ? "Installing…" : "Install"}</Button>
+            </div>
+            <div className="text-muted">{parts.map((x) => `${x.label} (${x.license}, ${x.size})`).join(" + ")}</div>
+            {busy && <div className="text-accent">{parts.find((x) => x.status === "installing")?.message}</div>}
+            {failed && <div className="text-bad">Install failed: {failed.message}</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -308,7 +329,7 @@ function JobList({ selected, onSelect }: { selected: string | null; onSelect: (i
             <div className="flex items-center gap-2">
               <span className="text-[12.5px] font-medium">{j.formula}</span>
               <span className="text-[11px] text-muted">{j.functional} · k {j.kmesh.join("×")}</span>
-              <span className="ml-auto">{j.passed ? <Tag tone="ok">{j.n_checks} checks passed</Tag> : <Tag tone="bad">{j.n_failed} failed</Tag>}</span>
+              <span className="ml-auto">{j.passed ? <Tag tone="ok">{j.n_passed ?? j.n_checks} checks passed</Tag> : <Tag tone="bad">{j.n_failed} failed</Tag>}</span>
             </div>
             <div className="mt-0.5 flex gap-3 text-[11px] text-muted"><span className="font-mono">{j.structure.split("/").pop()}</span><span>{clock(j.created)}</span></div>
           </button>
@@ -327,13 +348,15 @@ function JobWorkspace({ id, onClose }: { id: string; onClose: () => void }) {
   const job = q.data;
   const p = job.provenance;
   const failed = job.checks.results.filter((r) => r.ok === false).length;
-  const done = job.checks.results.filter((r) => r.ok !== null).length;
+  const done = job.checks.results.filter((r) => r.ok === true).length;
+  const notRun = job.checks.results.filter((r) => r.ok === null).length;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-line bg-surface">
         <div className="flex items-center gap-3 px-5 pb-2 pt-3">
           <h1 className="text-[15px] font-semibold">{p.cell.formula} <span className="font-normal text-muted">· {p.request.functional} ground state · k {p.request.kmesh.join("×")}</span></h1>
-          {job.checks.passed ? <Tag tone="ok"><CheckCircle2 size={11} /> {done} sanity checks passed</Tag>
+          {job.checks.passed ? <Tag tone="ok" title={notRun ? `${notRun} could not run here (see Checks)` : undefined}>
+            <CheckCircle2 size={11} /> {done} sanity checks passed{notRun ? ` · ${notRun} not run` : ""}</Tag>
             : <Tag tone="bad"><XCircle size={11} /> {failed} of {job.checks.results.length} checks failed</Tag>}
           <a href={dft.archiveUrl(id)} className="ml-auto"><Button size="sm" variant="secondary"><Download size={13} /> Download set (.zip)</Button></a>
           <button onClick={onClose} title="Close and go back to the start page" aria-label="Close"
@@ -356,10 +379,6 @@ function JobWorkspace({ id, onClose }: { id: string; onClose: () => void }) {
           badge: Object.values(job.runs ?? {}).some(runIsLive) ? <Dot tone="run" /> : undefined },
         { key: "convergence", label: "Convergence", icon: TrendingDown, body: <ConvergencePane job={job} />,
           badge: studyDot(job.studies?.convergence?.status) },
-        { key: "eos", label: "Equation of state", icon: Sigma, body: <EosPane job={job} />, badge: studyDot(job.studies?.eos?.status) },
-        { key: "raman", label: "Raman", icon: Waves, body: <RamanPane job={job} />,
-          badge: studyDot(Object.values(job.studies?.raman ?? {}).map((x) => x.status).find((x) => x === "running") ??
-            Object.values(job.studies?.raman ?? {})[0]?.status) },
       ]} />
     </div>
   );
@@ -453,7 +472,7 @@ function ChecksPane({ job }: { job: DftJob }) {
 
 function studiesLive(job?: DftJob) {
   const st = job?.studies;
-  const all = [st?.convergence?.status, st?.eos?.status, ...Object.values(st?.raman ?? {}).map((r) => r.status)];
+  const all = [st?.convergence?.status];
   return all.some((x) => x === "running" || x === "queued");
 }
 
@@ -465,7 +484,6 @@ function studyDot(status?: string) {
 function DftOverview({ job }: { job: DftJob }) {
   const p = job.provenance;
   const failed = job.checks.results.filter((r) => r.ok === false).length;
-  const eos = job.studies?.eos;
   return (
     <div className="grid h-full gap-4 overflow-auto p-4 text-[13px] md:grid-cols-2">
       <div className="space-y-3">
@@ -480,7 +498,9 @@ function DftOverview({ job }: { job: DftJob }) {
       <div className="space-y-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Checks</h3>
         <p>{failed ? <Tag tone="bad">{failed} failed</Tag> : <Tag tone="ok">all passed</Tag>} <span className="text-muted">
-          {job.checks.results.length} checks across {Object.keys(p.generated).length} codes: each input read back as its code reads it.</span></p>
+          {job.checks.results.filter((r) => r.ok === true).length} checks passed
+          {job.checks.results.some((r) => r.ok === null) && `, ${job.checks.results.filter((r) => r.ok === null).length} not run`} across{" "}
+          {Object.keys(p.generated).length} codes: each input read back as its code reads it.</span></p>
         <h3 className="pt-2 text-xs font-semibold uppercase tracking-wider text-faint">Runs</h3>
         <table className="tabular w-full text-[12.5px]"><tbody className="divide-y divide-line">
           {Object.entries(p.generated).map(([code, g]) => {
@@ -492,10 +512,7 @@ function DftOverview({ job }: { job: DftJob }) {
           })}
         </tbody></table>
         <h3 className="pt-2 text-xs font-semibold uppercase tracking-wider text-faint">Studies</h3>
-        <p className="text-muted">Convergence: {job.studies?.convergence?.status ?? "not run"} · Equation of state: {eos?.status ?? "not run"}
-          {eos?.delta_meV_per_atom && Object.keys(eos.delta_meV_per_atom).length > 0 &&
-            ` · largest Δ ${Math.max(...Object.values(eos.delta_meV_per_atom)).toFixed(2)} meV/atom`}
-          {" · "}Raman: {Object.keys(job.studies?.raman ?? {}).join(", ") || "not run"}</p>
+        <p className="text-muted">Convergence: {job.studies?.convergence?.status ?? "not run"}</p>
       </div>
     </div>
   );

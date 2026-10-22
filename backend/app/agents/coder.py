@@ -21,7 +21,7 @@ Skill notes follow.
 
 def write_step(plan: Plan, step: PlanStep, manifests: list[Manifest], previous_outputs: list[str],
                last_code: str | None = None, last_error: str | None = None) -> CoderOutput:
-    skill_text = "\n\n---\n\n".join(skills.load(n) for n in ("step_contract.md", step.skill))
+    skill_text = "\n\n---\n\n".join(skills.load(n) for n in ("step_contract.md", *skills.for_step(step.skill)))
     parts = [
         f"Run plan: {plan.title}\n{plan.summary}",
         f"Write the script for step {step.idx} '{step.name}':\n{step.goal}",

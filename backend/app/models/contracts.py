@@ -51,11 +51,19 @@ class Manifest(BaseModel):
 
 # --- Runs -------------------------------------------------------------------
 
+Engine = Literal["agents", "gsas2", "maud"]
+
+
 class RunRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=4000)
     dataset_ids: list[str] = Field(min_length=1)
     parent_run_id: str | None = None
     session_id: str | None = None
+    # agents = Claude writes the analysis; gsas2 / maud = that program refines the scan. Several engines start one run
+    # each, sharing a group_id, so their results can be compared.
+    engines: list[Engine] = Field(default_factory=lambda: ["agents"], min_length=1)
+    engine: Engine = "agents"           # set per run by the API
+    group_id: str | None = None
 
 
 class PlanStep(BaseModel):

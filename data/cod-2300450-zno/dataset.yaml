@@ -1,0 +1,8 @@
+id: cod-2300450-zno
+role: reference_structure
+technique: xrd_powder
+material: ZnO
+format: cif
+files: [raw/2300450.cif]
+source: https://www.crystallography.net/cod/2300450.html
+license: null                 # not verified for this entry; check the COD terms before redistribution
