@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FileText, Plus, RefreshCw, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import { api, type DatasetNode } from "../api/client";
+import { api, type DatasetNode, type ScanPreview } from "../api/client";
 import { Button, Dialog, Empty, Field, PanelHeader, cn, inputCls, num } from "../components/ui";
 import { XrdInspector } from "./XrdInspector";
 import { xrd } from "../api/client";
@@ -23,6 +23,7 @@ export function StorageView() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const data = tree.data ?? [];
   const current = data.find((d) => d.id === openId) ?? data.find((d) => d.role === "measured_pattern") ?? data.find((d) => d.valid) ?? null;
   const invalid = data.filter((d) => !d.valid);
@@ -33,6 +34,8 @@ export function StorageView() {
         <PanelHeader title="Datasets" meta={data.length ? String(data.length) : undefined} actions={<>
           <Button variant="ghost" size="sm" title="Re-index manifests" onClick={() => rescan.mutate()}>
             <RefreshCw size={13} className={cn(rescan.isPending && "animate-spin")} /></Button>
+          <Button variant="secondary" size="sm" onClick={() => setScanning(true)} title="Import your own powder scan (.xy, .xye, .csv, .dat)">
+            <Upload size={13} /> Scan</Button>
           <Button variant="secondary" size="sm" onClick={() => setImporting(true)} title="Import a structure from Materials Project">MP</Button>
           <Button variant="primary" size="sm" onClick={() => setAdding(true)}><Plus size={13} /> Add dataset</Button>
         </>} />
@@ -62,6 +65,9 @@ export function StorageView() {
       </section>
       <Dialog title="Import from Materials Project" open={importing} onClose={() => setImporting(false)}>
         <ImportMp onDone={(id) => { setImporting(false); setOpenId(id); qc.invalidateQueries({ queryKey: ["datasets"] }); }} />
+      </Dialog>
+      <Dialog title="Import your own scan" open={scanning} onClose={() => setScanning(false)}>
+        <ImportScan onDone={(id) => { setScanning(false); setOpenId(id); qc.invalidateQueries({ queryKey: ["datasets"] }); }} />
       </Dialog>
       <Dialog title="Add dataset" open={adding} onClose={() => setAdding(false)}>
         <AddDataset onDone={(id) => { setAdding(false); setOpenId(id); qc.invalidateQueries({ queryKey: ["datasets"] }); }} />
@@ -252,6 +258,53 @@ function ImportMp({ onDone }: { onDone: (id: string) => void }) {
       {imp.isError && <p className="text-xs text-bad">{String(imp.error instanceof Error ? imp.error.message : imp.error)}</p>}
       <div className="flex justify-end"><Button variant="primary" disabled={!id.trim() || imp.isPending} onClick={() => imp.mutate()}>
         {imp.isPending ? "Importing…" : "Import"}</Button></div>
+    </div>
+  );
+}
+
+/** Drop in a text pattern: CoRefine reads it, shows what it found, and asks only for what the file does not say. */
+function ImportScan({ onDone }: { onDone: (id: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [form, setForm] = useState({ material: "", wavelength_A: "", radiation: "", ka2: "", dataset_id: "" });
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const prev = useMutation({
+    mutationFn: (f: File) => api.scanPreview(f),
+    onSuccess: (r) => setForm((f) => ({ ...f, dataset_id: r.suggested_id, wavelength_A: r.wavelength_A ? String(r.wavelength_A) : "" })),
+  });
+  const imp = useMutation({ mutationFn: () => api.scanImport(file!, form), onSuccess: (r) => onDone(r.id) });
+  const p: ScanPreview | undefined = prev.data;
+  const err = (e: unknown) => String(e instanceof Error ? e.message : e);
+  return (
+    <div className="space-y-3">
+      <input ref={input} type="file" accept=".xy,.xye,.csv,.dat,.txt" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFile(f); prev.mutate(f); } }} />
+      <Button variant="secondary" onClick={() => input.current?.click()}><Upload size={13} /> {file ? file.name : "Choose a scan file"}</Button>
+      <p className="text-[11px] text-muted">A text file with 2θ (degrees) and intensity per line; a header line and a third σ column are fine.
+        Nothing leaves your computer.</p>
+      {prev.isPending && <p className="text-xs text-muted">Reading…</p>}
+      {prev.isError && <p className="text-xs text-bad">{err(prev.error)}</p>}
+      {p && <>
+        <div className="rounded-md border border-line bg-subtle p-2.5 text-[12px]">
+          <div className="font-medium">Found {p.n_points} points, 2θ {p.two_theta_min.toFixed(2)}° to {p.two_theta_max.toFixed(2)}°, step {p.step_deg.toFixed(3)}°</div>
+          <div className="text-muted">{p.wavelength_A ? `Wavelength ${p.wavelength_A} Å and anode ${p.anode ?? "?"} read from the file header.`
+            : "The file does not give a wavelength; enter it below."}</div>
+          {p.notes.map((n) => <div key={n} className="text-warn">{n}</div>)}
+        </div>
+        <Field label="Sample (formula or elements)" hint="For example Cu2O or Cu,C,O. Needed to identify the phase; leave empty to just view and fit peaks.">
+          <input className={inputCls} value={form.material} onChange={set("material")} placeholder="Cu,C,O" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Wavelength (Å)" hint={p.wavelength_A ? "from the file header" : "required: ask who measured it"}>
+            <input className={cn(inputCls, "font-mono")} value={form.wavelength_A} onChange={set("wavelength_A")} /></Field>
+          <Field label="Kα2 still in the data?" hint="Cu tube without a monochromator: yes">
+            <select className={inputCls} value={form.ka2} onChange={set("ka2")}>
+              <option value="">I don't know</option><option value="true">Yes</option><option value="false">No</option></select></Field>
+        </div>
+        <Field label="Dataset id"><input className={cn(inputCls, "font-mono")} value={form.dataset_id} onChange={set("dataset_id")} /></Field>
+        {imp.isError && <p className="text-xs text-bad">{err(imp.error)}</p>}
+        <div className="flex justify-end"><Button variant="primary" disabled={imp.isPending || !form.wavelength_A} onClick={() => imp.mutate()}>
+          {imp.isPending ? "Importing…" : "Import and open"}</Button></div>
+      </>}
     </div>
   );
 }

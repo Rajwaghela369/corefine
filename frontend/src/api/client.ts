@@ -60,6 +60,21 @@ export const api = {
     files.forEach((f) => fd.append("files", f));
     return fetch(`${API}/datasets/${id}/files`, { method: "POST", body: fd }).then(json<{ saved: string[] }>);
   },
+  scanPreview: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API}/datasets/scan/preview`, { method: "POST", body: fd }).then(json<ScanPreview>);
+  },
+  scanImport: (file: File, f: { material: string; wavelength_A: string; radiation: string; ka2: string; dataset_id: string }) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("material", f.material);
+    if (f.wavelength_A) fd.append("wavelength_A", f.wavelength_A);
+    fd.append("radiation", f.radiation);
+    if (f.ka2) fd.append("ka2_present", f.ka2);
+    fd.append("dataset_id", f.dataset_id);
+    return fetch(`${API}/datasets/scan/import`, { method: "POST", body: fd }).then(json<{ id: string; notes: string[] }>);
+  },
   rescan: () => fetch(`${API}/datasets/rescan`, { method: "POST" }).then(json),
   runs: () => fetch(`${API}/runs`).then(json<RunListItem[]>),
   run: (id: string) => fetch(`${API}/runs/${id}`).then(json<RunDetail>),
@@ -262,4 +277,10 @@ export const xrd = {
       .then(json<XrdSimulated>),
   importMp: (mp_id: string) => fetch(`${API}/xrd/import/materials-project`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mp_id }) }).then(json<{ dataset: string }>),
+};
+
+export type ScanPreview = {
+  filename: string; suggested_id: string; n_points: number; two_theta_min: number; two_theta_max: number; step_deg: number;
+  max_intensity: number; has_sigma: boolean; header: Record<string, string>; wavelength_A: number | null; anode: string | null;
+  notes: string[];
 };

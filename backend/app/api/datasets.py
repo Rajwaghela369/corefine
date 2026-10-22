@@ -2,12 +2,13 @@
 
 import gemmi
 import yaml
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.retrieval import index
 from app.storage import datasets
 from app.storage.objects import get_store
+from app.xrd import ingest
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -81,6 +82,59 @@ def _validate_file(name: str, data: bytes, fmt: str) -> None:
                                       for b in doc):
             raise HTTPException(400, detail=f"{name}: no 2θ loop (_pd_proc_2theta_corrected or _pd_meas_2theta_scan)"
                                             " found; this does not look like a powder pattern")
+
+
+async def _read_scan(file: UploadFile) -> tuple[str, str, ingest.ParsedScan]:
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, detail=f"{file.filename} exceeds {MAX_UPLOAD_BYTES} bytes")
+    name = (file.filename or "scan.xy").rsplit("/", 1)[-1]
+    text = data.decode("utf-8", errors="replace")
+    try:
+        return name, text, ingest.parse_scan(text)
+    except ingest.ScanError as e:
+        _bad(e)
+
+
+@router.post("/scan/preview")
+async def preview_scan(file: UploadFile):
+    """Read a text scan (.xy, .xye, .csv, .dat) and say what was found, without saving anything."""
+    name, _, scan = await _read_scan(file)
+    existing = {n.id for n in datasets.tree()}
+    base = ingest.slug(name)
+    return {"filename": name, "suggested_id": base if base not in existing else f"{base}-2", **scan.summary()}
+
+
+@router.post("/scan/import")
+async def import_scan(file: UploadFile, material: str = Form(""), wavelength_A: float | None = Form(None),
+                      radiation: str = Form(""), ka2_present: bool | None = Form(None), dataset_id: str = Form("")):
+    """Turn an uploaded text scan into a measured-pattern dataset (powder CIF + manifest) ready for every analysis."""
+    name, text, scan = await _read_scan(file)
+    wl, source = wavelength_A, "entered by the person who uploaded the file"
+    if wl is None:
+        wl, source = scan.wavelength_A, f"header of {name}"
+    if wl is None or not 0.2 < wl < 5:
+        raise HTTPException(400, detail="a wavelength in ångström is needed (0.2 to 5); the file header has none. "
+                                        "Ask whoever measured it, or read it from the instrument settings")
+    ds_id = dataset_id.strip() or ingest.slug(name)
+    if any(n.id == ds_id for n in datasets.tree()):
+        raise HTTPException(409, detail=f"a dataset called {ds_id!r} already exists; choose another id")
+    rad = radiation.strip() or (f"{scan.anode} Kα" if scan.anode else "X-ray")
+    try:
+        manifest = ingest.manifest_for(ds_id, scan, material.strip(), wl, source, rad, ka2_present, name)
+        m = datasets.parse_manifest(yaml.safe_dump(manifest), expected_id=ds_id)
+    except (datasets.ManifestError, ValueError) as e:
+        _bad(e)
+    store = get_store()
+    cif_name = ingest.slug(name) + ".cif"
+    store.put(f"datasets/{ds_id}/raw/{cif_name}", ingest.to_pdcif(scan, ds_id, wl, rad, name).encode(), "chemical/x-cif")
+    store.put(f"datasets/{ds_id}/original/{name}", text.encode(), "text/plain")
+    store.put(f"datasets/{ds_id}/README.md", (f"# {ds_id}\n\nUploaded scan `{name}` ({scan.x.size} points, "
+              f"2θ {scan.x.min():g}–{scan.x.max():g}°). Wavelength {wl:g} Å from {source}. "
+              "No certified reference value; 2θ zero correction unknown.\n").encode(), "text/markdown")
+    datasets.write_manifest(m, store)
+    _index_docs(m)
+    return {"id": ds_id, "file": cif_name, "manifest": m.model_dump(exclude_none=True), "notes": scan.notes}
 
 
 @router.post("/{dataset_id}/files")

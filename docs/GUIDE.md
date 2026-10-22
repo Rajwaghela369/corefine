@@ -57,6 +57,23 @@ Set-up commands are in the [README](../Readme.md#try-it-on-your-laptop). Once th
 If nothing is configured (no API key), steps 1 to 3 still work. Only the AI agents and the chat need
 an `ANTHROPIC_API_KEY`.
 
+## Using your own scan
+
+You don't need to prepare the file. In **Storage** click **Scan**, choose your `.xy` (or `.xye`, `.csv`,
+`.dat`) file and CoRefine reads it. It shows how many points and what angle range it found, and takes the
+wavelength from the file header if there is one. You only fill in what a file cannot say:
+
+- **Sample:** a formula (`Cu2O`) or elements (`Cu,C,O`). It is used to identify the phase. You can leave it
+  empty to just view the scan and fit peaks.
+- **Wavelength:** only if the header has none. CoRefine never guesses it; ask whoever measured the sample.
+- **Kα2:** whether the second copper line is still in the data. "I don't know" is allowed.
+
+The scan is then stored like the NIST ones (as a powder CIF, with your original file kept next to it), and
+everything works on it: the plot, peak fitting, phase identification, comparison with a DFT structure, and
+the agents. GSAS-II and MAUD also need a reference structure for the phase. There is no certified answer for
+your sample, so a result is a measurement, not a check against a reference. The converted file records that
+whether 2θ was zero-corrected is unknown.
+
 ## How the project is built
 
 ```

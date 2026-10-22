@@ -67,7 +67,8 @@ Then try this five-minute tour:
 2. Search `GaAs`, pick the stable phase and click **Generate**. You get inputs for every code, each
    one read back and checked.
 3. Open **Runs** and run it. Each code's band gap appears under **Overview**; **Theory ↔ Experiment** shows how each step went.
-4. **Lab → Experiment · XRD** has the silicon scans. **Lab → Theory ↔ Experiment** puts both sides
+4. **Your own scan:** in **Storage** click **Scan** and pick a `.xy`/`.xye`/`.csv` file. See [docs/GUIDE.md](docs/GUIDE.md#using-your-own-scan).
+5. **Lab → Experiment · XRD** has the silicon scans. **Lab → Theory ↔ Experiment** puts both sides
    together.
 
 What works where:

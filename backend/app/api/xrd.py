@@ -118,7 +118,11 @@ def identify(body: IdentifyBody):
     """Which Materials Project polymorph explains the measured peaks best."""
     try:
         x, y, wl, file, m = patterns.measured_full(body.dataset, body.file)
-        cands = materials.search(body.formula or m.material, limit=body.max_candidates)
+        formula = body.formula or m.material
+        if formula.strip().lower() in ("", "unknown"):
+            raise HTTPException(400, detail="tell CoRefine what the sample is (a formula such as Cu2O, or elements such as Cu,C,O) "
+                                            "to identify the phase")
+        cands = materials.search(formula, limit=body.max_candidates)
     except (patterns.PatternError, datasets.ManifestError, materials.SearchError) as e:
         raise HTTPException(400, detail=str(e)) from e
     peaks = analysis.find_measured_peaks(x, y)

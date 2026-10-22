@@ -73,7 +73,7 @@ function XrdForm({ session, selected, onSelect }: { session: string; selected: s
           <div className="mb-1.5 text-xs font-medium text-ink-2">Measured scan</div>
           {measured.length ? <select className={inputCls} value={scanId} onChange={(e) => setScan(e.target.value)}>
             {measured.map((d) => <option key={d.id} value={d.id}>{d.id}{d.material ? ` · ${d.material}` : ""}</option>)}</select>
-            : <p className="text-[11px] text-muted">No measured patterns in Storage yet.</p>}
+            : <p className="text-[11px] text-muted">No measured patterns in Storage yet. In Storage, <b>Scan</b> imports your own file.</p>}
           {scanId && manifest.data && <p className="mt-1 text-[10.5px] leading-4 text-muted">
             {String(inst.radiation ?? "")} · λ = {String(inst.wavelength_A ?? "?")} Å {inst.ka2_present ? "· Kα1 + Kα2" : ""}
             {manifest.data.reference_values ? " · certified value on file (hidden from the analysis)" : ""}</p>}
