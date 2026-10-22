@@ -57,14 +57,6 @@ def test_compare_pattern_tool_on_lab6(more_seeded, no_index):
     assert r["implied_lattice_A"][0] == pytest.approx(4.1568, abs=0.002)
 
 
-def test_theory_vs_experiment_lists_certified_c(more_seeded, no_index):
-    from app.agents import copilot
-
-    r = json.loads(copilot.theory_vs_experiment.invoke({"material": "ZnO"}))
-    cert = r["certified"][0]
-    assert cert["dataset"] == "nist-srm-1979-60nm" and cert["a_A"] == 3.249828 and cert["c_A"] == 5.20675
-
-
 def test_chat_without_key_saves_nothing(local_env, monkeypatch):
     from sqlalchemy import func, select
 

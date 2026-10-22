@@ -1,12 +1,15 @@
-"""The one module that calls Claude. Every call is traced in Langfuse (when keys are set) and uses
-model names from config. Agents get typed, schema-validated output via structured outputs."""
+"""The one module that builds Claude models, as LangChain `ChatAnthropic` chat models. Model names come from config;
+agents get typed, schema-validated output through Claude's native structured outputs (`method="json_schema"`)."""
 
 import base64
-from contextlib import nullcontext
+from collections.abc import Callable
 from functools import lru_cache
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import anthropic
+from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -21,25 +24,21 @@ class LLMError(RuntimeError):
 
 
 @lru_cache
-def get_client() -> anthropic.Anthropic:
+def chat_model(model: str | None = None, *, max_tokens: int = 16000, effort: str | None = "high") -> ChatAnthropic:
+    """A configured Claude chat model, shared by the run agents and the co-pilot.
+
+    Streaming keeps long generations (the Coder's 32k tokens) under the SDK's 10-minute non-streaming guard;
+    server-side fallbacks retry declined requests on Anthropic's recommended model.
+    """
     s = get_settings()
-    return anthropic.Anthropic(api_key=s.ANTHROPIC_API_KEY or None, max_retries=3)
-
-
-@lru_cache
-def get_langfuse():
-    s = get_settings()
-    if not s.langfuse_enabled:
-        return None
-    from langfuse import Langfuse
-
-    return Langfuse(public_key=s.LANGFUSE_PUBLIC_KEY, secret_key=s.LANGFUSE_SECRET_KEY, host=s.LANGFUSE_HOST or None)
-
-
-def trace_span(name: str, **kwargs):
-    """A Langfuse span (or a no-op) to group a run's LLM calls into one trace."""
-    lf = get_langfuse()
-    return lf.start_as_current_observation(name=name, as_type="span", **kwargs) if lf else nullcontext()
+    kw: dict = dict(model=model or s.MODEL_MAIN, max_tokens=max_tokens, api_key=s.ANTHROPIC_API_KEY or None,
+                    max_retries=3, streaming=True, thinking={"type": "adaptive"})
+    if effort:
+        kw["output_config"] = {"effort": effort}
+    if s.LLM_SERVER_FALLBACKS:
+        kw["betas"] = [FALLBACK_BETA]
+        kw["model_kwargs"] = {"fallbacks": "default"}
+    return ChatAnthropic(**kw)
 
 
 def image_block(png: bytes) -> dict:
@@ -47,58 +46,49 @@ def image_block(png: bytes) -> dict:
                                         "data": base64.standard_b64encode(png).decode()}}
 
 
+class _TextStream(BaseCallbackHandler):
+    """Forwards the model's output text to a callback as it is generated (the JSON of the structured answer)."""
+
+    def __init__(self, on_text: Callable[[str], None]):
+        self.on_text = on_text
+
+    def on_llm_new_token(self, token: str, *, chunk: Any = None, **kwargs: Any) -> None:
+        content = getattr(getattr(chunk, "message", None), "content", None)
+        if isinstance(content, list):
+            token = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+        if token:
+            self.on_text(token)
+
+
 def parse(*, agent: str, system: str, content: list[dict] | str, output: type[T],
-          model: str | None = None, effort: str = "high", max_tokens: int = 16000) -> T:
-    """One structured call. Raises LLMError on refusal, truncation or a missing parsed output."""
-    s = get_settings()
-    model = model or s.MODEL_MAIN
-    kwargs: dict = dict(
-        model=model,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": content}],
-        thinking={"type": "adaptive"},
-        output_config={"effort": effort},
-        output_format=output,
-    )
-    if s.LLM_SERVER_FALLBACKS:
-        kwargs["extra_headers"] = {"anthropic-beta": FALLBACK_BETA}
-        kwargs["extra_body"] = {"fallbacks": "default"}
-
-    lf = get_langfuse()
-    gen = (lf.start_as_current_observation(name=agent, as_type="generation", model=model,
-                                           input={"system": system, "content": _loggable(content)})
-           if lf else nullcontext())
-    with gen as g:
-        try:
-            # Streamed so large max_tokens (the Coder's 32k) passes the SDK's 10-minute non-streaming guard
-            with get_client().messages.stream(**kwargs) as stream:
-                resp = stream.get_final_message()
-        except anthropic.APIStatusError as e:
-            if g:
-                g.update(level="ERROR", status_message=str(e))
-            raise LLMError(f"{agent}: API error {e.status_code}: {e.message}") from e
-        except anthropic.APIConnectionError as e:
-            raise LLMError(f"{agent}: could not reach the Anthropic API") from e
-        if g:
-            g.update(output=resp.parsed_output.model_dump() if resp.parsed_output else None,
-                     usage_details={"input": resp.usage.input_tokens, "output": resp.usage.output_tokens},
-                     metadata={"stop_reason": resp.stop_reason, "request_id": getattr(resp, "_request_id", None)})
-    if resp.stop_reason == "refusal":
-        cat = resp.stop_details.category if resp.stop_details else None
+          model: str | None = None, effort: str = "high", max_tokens: int = 16000,
+          on_text: Callable[[str], None] | None = None) -> T:
+    """One structured call. Raises LLMError on refusal, truncation or a missing parsed output.
+    on_text, when given, receives the output text as it streams (for the live view)."""
+    runnable = chat_model(model, max_tokens=max_tokens, effort=effort).with_structured_output(
+        output, method="json_schema", include_raw=True)
+    config: dict = {"run_name": agent, "tags": [agent]}
+    if on_text:
+        config["callbacks"] = [_TextStream(on_text)]
+    try:
+        res = runnable.invoke([SystemMessage(system), HumanMessage(content)], config=config)
+    except anthropic.APIStatusError as e:
+        raise LLMError(f"{agent}: API error {e.status_code}: {e.message}") from e
+    except anthropic.APIConnectionError as e:
+        raise LLMError(f"{agent}: could not reach the Anthropic API") from e
+    meta = res["raw"].response_metadata
+    stop = meta.get("stop_reason")
+    if stop == "refusal":
+        cat = (meta.get("stop_details") or {}).get("category")
         raise LLMError(f"{agent}: model declined the request (category: {cat})")
-    if resp.stop_reason == "max_tokens":
+    if stop == "max_tokens":
         raise LLMError(f"{agent}: output hit max_tokens={max_tokens} before finishing")
-    if resp.parsed_output is None:
-        raise LLMError(f"{agent}: no structured output returned")
-    return resp.parsed_output
-
-
-def _loggable(content):
-    if isinstance(content, str):
-        return content
-    return [b if b.get("type") != "image" else {"type": "image", "omitted": True} for b in content]
+    if res["parsed"] is None:
+        raise LLMError(f"{agent}: no structured output returned" + (f" ({res['parsing_error']})" if res["parsing_error"] else ""))
+    return res["parsed"]
 
 
 def ping() -> None:
-    get_client().models.retrieve(get_settings().MODEL_MAIN)
+    """Health check without spending tokens: the model is known to the API. LangChain has no model-lookup call."""
+    s = get_settings()
+    anthropic.Anthropic(api_key=s.ANTHROPIC_API_KEY or None, max_retries=1).models.retrieve(s.MODEL_MAIN)

@@ -14,12 +14,13 @@ class ChatRequest(BaseModel):
     session_id: str = Field(min_length=4, max_length=64)
     message: str = Field(min_length=1, max_length=4000)
     dataset_ids: list[str] = Field(default_factory=list)
+    run_id: str | None = Field(default=None, max_length=64)
 
 
 @router.post("", response_class=EventSourceResponse)
 async def chat(req: ChatRequest):
     try:
-        async for ev in iterate_in_threadpool(copilot.chat(req.session_id, req.message, req.dataset_ids)):
+        async for ev in iterate_in_threadpool(copilot.chat(req.session_id, req.message, req.dataset_ids, req.run_id)):
             yield ServerSentEvent(data=ev, event=ev["type"])
     except Exception as e:  # surface agent/API errors to the chat instead of a dropped stream
         yield ServerSentEvent(data={"type": "error", "message": str(e)}, event="error")

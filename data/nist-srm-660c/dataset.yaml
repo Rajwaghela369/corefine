@@ -6,6 +6,7 @@ format: pdcif
 files: [raw/*.cif]
 instrument:
   radiation: CuKa             # file: _diffrn_radiation_type 'Cu K\a'; post-specimen graphite analyzer, no incident-beam monochromator
+  probe: x-ray                # file: _diffrn_radiation_probe x-ray
   wavelength_A: 1.5405929     # Cu Kα1. NOT in the CIFs; from NIST SRM 660c certificate, Table 1 (λ = 0.154 059 29 nm)
   wavelength_source: "NIST SRM 660c certificate (29 Oct 2015), Table 1"
   ka2_present: true           # no Johansson monochromator: fit Kα1/Kα2 doublets, not single peaks

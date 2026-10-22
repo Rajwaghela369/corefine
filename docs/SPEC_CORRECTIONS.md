@@ -53,7 +53,7 @@ certification does. This is a hypothesis, not tested.
   fastembed's dependencies. **The sandbox snapshot uses Python 3.13**, the newest series Daytona's
   `Image.debian_slim` accepts.
 - **Local mode** (`COREFINE_MODE=local`): disk instead of S3, SQLite instead of Neon, local Qdrant,
-  a subprocess runner instead of Daytona, Langfuse off. Used for development, tests and the
+  a subprocess runner instead of Daytona. Used for development, tests and the
   venue-Wi-Fi fallback. Cloud mode uses the managed services.
 - **The local runner is not network-isolated.** There is no Docker and unprivileged user namespaces are
   blocked on the dev laptop, so `LocalDockerRunner` became a subprocess runner. A sitecustomize hook
@@ -74,3 +74,27 @@ certification does. This is a hypothesis, not tested.
 - **`start_run` in chat only proposes a run.** It starts only when the user clicks Confirm in the UI.
 - **The schema is created with SQLAlchemy `create_all`** (idempotent), not Alembic migrations.
 - **shadcn/ui-style components are hand-written** with Tailwind; the shadcn generator was not run.
+- **Langfuse removed.** Tracing was dropped on request (2026-10-22); `/health` checks five services
+  and no `LANGFUSE_*` settings exist. The spec items about Langfuse traces no longer apply.
+- **Theory ↔ Experiment removed** (2026-10-22, on request): the `/bridge` endpoints, the comparison page and the
+  co-pilot's `theory_vs_experiment` tool are gone. The per-run reasoning story used by the XRD *Reasoning* tab moved
+  to `app/orchestration/story.py`; the Storage pattern comparison (`/xrd/compare`) stays.
+- **LangChain and LangGraph throughout** (2026-10-22): every Claude call is a LangChain `ChatAnthropic` model from
+  `app/agents/llm.py` (structured output via `with_structured_output(method="json_schema")`, with thinking, effort,
+  streaming and server-side fallbacks as before). GSAS-II/MAUD runs and the DFT workflow became LangGraph graphs like
+  the agent run graph; the DFT workflow pauses before its runs (checkpointer) and resumes them in the background.
+  The raw Anthropic SDK is used only for the token-free health check and its exception types.
+- **Programs run on the user's computer; the backend uses the cloud services** (2026-10-22). Installs go to
+  `TOOLS_DIR` and run as detached processes (`python -m app.dft.tools <name>`, PID in `tools.json`), so a backend
+  restart no longer kills them; installs whose process is gone are settled from disk at startup and on every status
+  read (complete → installed, else failed with Retry). One *Software* page installs everything; Analyse and Simulate
+  link to it. macOS: MAUD installs from its official `.dmg.gz` (SHA-256 from the GitHub release record, Java and
+  `Maud.jar` inside `Maud.app`); conda-forge has no ABINIT for Apple Silicon, so the Intel build is installed and
+  runs under Rosetta 2.
+- **Instrument fields follow coreCIF** (2026-10-22): `instrument.radiation` is `_diffrn_radiation_type` (emission line,
+  e.g. Cu Kα1); the new `radiation_source` is `_diffrn_source` (sealed tube, synchrotron, reactor …) and `probe` is
+  `_diffrn_radiation_probe`. A legacy `radiation: synchrotron` is read as `radiation_source: synchrotron`; engines
+  decide lab vs synchrotron from `radiation_source`.
+- **One way to add data** (2026-10-22): *Add dataset* offers upload, Materials Project and COD (the COD CIF stored as
+  published, with its SHA-256). An uploaded CIF pre-fills the form from its own tags only (`/datasets/inspect`);
+  nothing is looked up, and refined values in a measured CIF are never read there.

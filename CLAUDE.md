@@ -4,13 +4,13 @@ Read this file and `docs/SPEC.md` (historical; `Readme.md` and `docs/GUIDE.md` d
 
 ## Layout
 - `backend/app/` — `api/` (FastAPI routers), `agents/` (llm client, planner, coder, analyst, copilot,
-  code-only checks), `orchestration/` (LangGraph run graph, recorder, SSE event bus), `sandbox/`
+  code-only checks), `orchestration/` (LangGraph graphs for agent runs and GSAS-II/MAUD runs, recorder, SSE event bus), `sandbox/`
   (local + Daytona runners), `storage/` (S3/local store, datasets, CIF sanitizer), `retrieval/` (Qdrant),
   `models/` (Pydantic contracts, SQLAlchemy tables).
 - `backend/skills/` — skill files loaded by name; `examples/gold_analysis.py` is the human-checked
   reference and its outputs are in `examples/gold_outputs/`.
 - `backend/tests/` — pytest; LLM calls mocked, everything else real (local mode).
-- `frontend/src/` — React + Vite + TS: `views/` (Storage, Lab with 2×2 Plan/Plots/Data/Report panes), `panels/`, `components/` (header, sidebar, UI primitives), `api/`.
+- `frontend/src/` — React + Vite + TS: `views/` (Home, Data, Analyse, Simulate, History, Software), `panels/` (new analysis, runs list, assistant), `components/` (header, sidebar, live reasoning, UI primitives), `api/`.
 - `backend/app/dft/` — structure (CIF/COD/Materials Project/storage) → standard cell → inputs for every registered code adapter (`codes/`) → read-back checks. New code = new `CodeAdapter` + one registry line. `execute.py` runs sets on targets from the per-user `compute.yaml` (local or Slurm over SSH) and parses results via the adapter. API `/dft/*`, CLI `scripts/dft_inputs.py`.
 - `data/` — seed dataset manifests and READMEs (raw files come from `backend/scripts/fetch_data.py`).
 
@@ -18,8 +18,10 @@ Read this file and `docs/SPEC.md` (historical; `Readme.md` and `docs/GUIDE.md` d
 - Use the managed services through their official SDKs; never self-host or reimplement them. Local
   mode exists only for development, tests and the venue fallback.
 - Secrets live only in `backend/.env`. The frontend and the sandbox never receive keys.
-- All Claude calls go through `app/agents/llm.py` (Langfuse tracing, model names from config,
-  structured outputs). The chat co-pilot uses `langchain-anthropic` inside Deep Agents.
+- All Claude models are LangChain `ChatAnthropic` instances built by `app/agents/llm.py` (`chat_model`, model names
+  from config); structured calls use `llm.parse` (native JSON-schema output). Pipelines are LangGraph graphs:
+  agent runs (`orchestration/graph.py`), engine runs (`orchestration/engine_run.py`), the DFT workflow
+  (`dft/workflow.py`); the chat co-pilot is a Deep Agents (LangGraph) agent on the same model factory.
 - No number may appear in a report or chat answer unless it comes from `metrics.json`, a manifest
   or a database row. The claim checker (`app/agents/checks.py`) is code and cannot be overridden.
 - The Coder never sees `reference_values` or the certified value. Measured CIFs are sanitized before

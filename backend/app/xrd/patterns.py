@@ -82,7 +82,7 @@ def measured(dataset_id: str, file: str | None = None, lo: float | None = None, 
     return {"dataset": dataset_id, "file": key.rsplit("/", 1)[-1], "files": [k.rsplit("/", 1)[-1] for k in keys],
             "x": xs, "y": ys, "n_points": int(sel.sum()), "range": [float(x.min()), float(x.max())],
             "wavelength_A": inst.get("wavelength_A"), "wavelength_source": inst.get("wavelength_source"),
-            "radiation": inst.get("radiation")}
+            "radiation": inst.get("radiation"), "radiation_source": inst.get("radiation_source")}
 
 
 def simulate(atoms: Atoms, wavelength_A: float, two_theta: tuple[float, float] = (10, 150), label: str = "") -> dict:

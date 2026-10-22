@@ -3,7 +3,7 @@
 Two modes:
   cloud  every managed-service key is required; a missing key fails startup with its name.
   local  dev/test fallback with no cloud accounts: files on disk, SQLite, local Qdrant,
-         subprocess runner, Langfuse off. ANTHROPIC_API_KEY is still needed for real LLM calls.
+         subprocess runner. ANTHROPIC_API_KEY is still needed for real LLM calls.
 """
 
 from functools import lru_cache
@@ -22,7 +22,7 @@ CLOUD_REQUIRED = (
     "DATABASE_URL",
     "QDRANT_URL", "QDRANT_API_KEY",
     "DAYTONA_API_KEY",
-)  # Langfuse is optional: without its keys tracing is off
+)
 
 
 class MissingSettingError(RuntimeError):
@@ -57,10 +57,6 @@ class Settings(BaseSettings):
     DAYTONA_API_KEY: str = ""
     DAYTONA_API_URL: str = ""
     DAYTONA_SNAPSHOT: str = "corefine-sci"
-
-    LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_SECRET_KEY: str = ""
-    LANGFUSE_HOST: str = ""
 
     # All-electron DFT codes (input generation and local checks). Unset = that code is skipped.
     EXCITING_ROOT: Path | None = None        # exciting source tree: species/ and xml/schema/
@@ -103,10 +99,6 @@ class Settings(BaseSettings):
             url = self.DATABASE_URL.replace("postgres://", "postgresql://", 1)
             return url.replace("postgresql://", "postgresql+psycopg://", 1)
         return f"sqlite:///{self.LOCAL_DATA_DIR / 'corefine.db'}"
-
-    @property
-    def langfuse_enabled(self) -> bool:
-        return bool(self.LANGFUSE_PUBLIC_KEY and self.LANGFUSE_SECRET_KEY)
 
 
 @lru_cache

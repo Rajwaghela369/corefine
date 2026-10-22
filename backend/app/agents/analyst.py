@@ -21,7 +21,7 @@ a short, honest report for a researcher who does not write code. You look at the
 
 
 def write_report(prompt: str, metrics: list[Metric], peaks_csv: str | None, plot_png: bytes | None,
-                 manifests: list[Manifest], rule_class: str, rule_reasons: list[str]) -> AnalystOutput:
+                 manifests: list[Manifest], rule_class: str, rule_reasons: list[str], on_text=None) -> AnalystOutput:
     text = "\n\n".join([
         f"The user asked: {prompt}",
         "Metrics (from metrics.json and orchestrator comparisons):\n"
@@ -43,4 +43,5 @@ def write_report(prompt: str, metrics: list[Metric], peaks_csv: str | None, plot
         content=content,
         output=AnalystOutput,
         effort="high",
+        on_text=on_text,
     )

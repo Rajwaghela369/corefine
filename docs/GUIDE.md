@@ -16,7 +16,7 @@ different kinds of people study it:
   the energy, the size of the box and the *band gap* (the energy the material needs before it
   conducts light or electricity).
 
-Normally these two groups never see each other's work in one place. CoRefine puts them side by side:
+Normally these two groups never see each other's work in one place. CoRefine does both in one app:
 
 ```
           measurement                                    calculation
@@ -31,35 +31,41 @@ One rule makes the results trustworthy: **language models plan and explain, ordi
 every number.** An AI never types a number into a report, and every number points to the file that
 made it.
 
-## The three screens
+## The pages
 
-Open the app and pick **Lab**. It has three parts.
+The sidebar on the left has six pages.
 
-| Screen | You bring | You get |
+| Page | You bring | You get |
 |---|---|---|
-| **Experiment · XRD** | a diffraction scan (the NIST silicon, LaB6 and ZnO scans are included) | the lattice parameter, the fit quality, a written report, and the reasoning behind each step |
-| **Theory · DFT** | a material name such as `GaAs` | ready-to-run input files for six DFT programs, a check that each one says what you meant, a run on your laptop, the band gap and a convergence study |
-| **Theory ↔ Experiment** | nothing; it reads the other two | the measured and the calculated lattice parameter side by side, with the steps that led to each |
+| **Home** | nothing | the main tasks and your recent analyses |
+| **Data** | a scan or structure file, or a Materials Project / COD id (the NIST silicon, LaB6 and ZnO scans are included) | a documented dataset; a CIF fills in its own radiation, wavelength and material |
+| **Analyse** | a measured scan and a question in plain words | the lattice parameter, the fit quality, a written report, and the reasoning behind each step, shown live |
+| **Simulate** | a material name such as `GaAs` | ready-to-run input files for six DFT programs, a check that each one says what you meant, a run on your computer, the band gap and a convergence study |
+| **History** | nothing | every analysis, searchable, with archive |
+| **Software** | one click | the scientific programs (GSAS-II, MAUD, Quantum ESPRESSO, ABINIT, GPAW) installed on your computer |
+
+The **Simple / Detailed** switch at the top hides or shows technical detail (IDs, raw names, code), and
+**Ask the assistant** opens a chat that knows which analysis or data you are looking at.
 
 ## Your first ten minutes
 
 Set-up commands are in the [README](../Readme.md#try-it-on-your-laptop). Once the app is open:
 
-1. **Look first, break nothing.** *Lab → Experiment · XRD* already has silicon data. Open any past
-   analysis and read the **Overview** and **Reasoning** tabs. Reasoning shows who did each step (a
+1. **Look first, break nothing.** *History* lists past analyses of the included silicon data. Open
+   one and read the **Overview** and **Reasoning** tabs. Reasoning shows who did each step (a
    language model, plain code or a scientific program) and why.
-2. **Run a calculation without installing anything.** *Lab → Theory · DFT*, click **install** on
-   Quantum ESPRESSO, search `GaAs`, click **Generate**, then run it from **Runs**. The band gap
-   appears under **Overview**.
-3. **See both worlds.** *Lab → Theory ↔ Experiment* for silicon. Read it top to bottom: the left
-   story is the experiment, the right is the calculation, and the last box compares them.
+2. **Install a program.** *Software*, click **Install** next to Quantum ESPRESSO (or GSAS-II). It
+   downloads from the official source into CoRefine's own folder; no administrator rights needed.
+3. **Run a calculation.** *Simulate*, search `GaAs`, click **Generate**, then run it from **Runs**.
+   The band gap appears under **Overview**.
+4. **Analyse a scan.** *Analyse*, choose the silicon scan, ask "refine the lattice parameter", and
+   watch the Reasoning tab fill in as the agents work.
 
-If nothing is configured (no API key), steps 1 to 3 still work. Only the AI agents and the chat need
-an `ANTHROPIC_API_KEY`.
+Without an `ANTHROPIC_API_KEY`, steps 1 to 3 still work; the AI agents and the chat need it.
 
 ## Using your own scan
 
-You don't need to prepare the file. In **Storage** click **Scan**, choose your `.xy` (or `.xye`, `.csv`,
+You don't need to prepare the file. In **Data** click **Scan**, choose your `.xy` (or `.xye`, `.csv`,
 `.dat`) file and CoRefine reads it. It shows how many points and what angle range it found, and takes the
 wavelength from the file header if there is one. You only fill in what a file cannot say:
 
@@ -128,7 +134,7 @@ DFT plans and the chat. Add `ANTHROPIC_API_KEY` to `backend/.env` for those.
 
 **Does it send my data anywhere?** In the default `local` mode nothing leaves your computer except
 downloads (datasets, programs, Materials Project lookups). `cloud` mode uses S3, Neon, Qdrant, Daytona
-and Langfuse, and needs your own accounts.
+and Anthropic, and needs your own accounts; the scientific programs still run on your computer.
 
 **Can the AI invent a result?** It can write wrong code, but it cannot put a number in the report that
 the code did not produce: the claim checker rejects it and the run retries.
@@ -140,8 +146,9 @@ what the checks are for.
 **Why does my DFT band gap differ from the textbook?** Standard DFT underestimates gaps. The app shows
 Materials Project's value next to yours so you can see the usual size of the gap.
 
-**The install button failed.** Check your internet connection and free disk space (a few GB). Everything
-lands in `backend/.local/tools/`; delete that folder and click install again.
+**An install failed.** *Software → Show install log* says why. Check your internet connection and free
+disk space (a few GB), then click **Retry**. Everything lands in `backend/.local/tools/`. On Apple
+Silicon Macs, ABINIT is the Intel build and runs under Rosetta 2.
 
 **The app says a code is not available.** exciting and Questaal are not one-click. Build them and set
 `EXCITING_ROOT` or `QUESTAAL_BIN` in `backend/.env`. VASP is commercial and needs your own licence.

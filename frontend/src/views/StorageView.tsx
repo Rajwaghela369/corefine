@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FileText, Plus, RefreshCw, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import { api, type DatasetNode, type ScanPreview } from "../api/client";
-import { Button, Dialog, Empty, Field, PanelHeader, cn, inputCls, num } from "../components/ui";
+import { api, type DatasetNode, type FileFacts, type ScanPreview, xrd } from "../api/client";
+import { radiationLabel } from "../components/labels";
+import { Button, Dialog, Empty, Field, PanelHeader, Tag, cn, inputCls, num } from "../components/ui";
 import { XrdInspector } from "./XrdInspector";
-import { xrd } from "../api/client";
 
 const GROUPS = [
   { role: "measured_pattern", title: "Measured patterns" },
@@ -22,7 +22,6 @@ export function StorageView() {
   const rescan = useMutation({ mutationFn: api.rescan, onSuccess: () => qc.invalidateQueries({ queryKey: ["datasets"] }) });
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [importing, setImporting] = useState(false);
   const [scanning, setScanning] = useState(false);
   const data = tree.data ?? [];
   const current = data.find((d) => d.id === openId) ?? data.find((d) => d.role === "measured_pattern") ?? data.find((d) => d.valid) ?? null;
@@ -36,7 +35,6 @@ export function StorageView() {
             <RefreshCw size={13} className={cn(rescan.isPending && "animate-spin")} /></Button>
           <Button variant="secondary" size="sm" onClick={() => setScanning(true)} title="Import your own powder scan (.xy, .xye, .csv, .dat)">
             <Upload size={13} /> Scan</Button>
-          <Button variant="secondary" size="sm" onClick={() => setImporting(true)} title="Import a structure from Materials Project">MP</Button>
           <Button variant="primary" size="sm" onClick={() => setAdding(true)}><Plus size={13} /> Add dataset</Button>
         </>} />
         <div className="min-h-0 flex-1 overflow-auto pb-4">
@@ -63,9 +61,6 @@ export function StorageView() {
       <section className="min-h-0 overflow-auto">
         {current ? <DatasetDetail key={current.id} d={current} /> : <Empty title="No dataset selected" />}
       </section>
-      <Dialog title="Import from Materials Project" open={importing} onClose={() => setImporting(false)}>
-        <ImportMp onDone={(id) => { setImporting(false); setOpenId(id); qc.invalidateQueries({ queryKey: ["datasets"] }); }} />
-      </Dialog>
       <Dialog title="Import your own scan" open={scanning} onClose={() => setScanning(false)}>
         <ImportScan onDone={(id) => { setScanning(false); setOpenId(id); qc.invalidateQueries({ queryKey: ["datasets"] }); }} />
       </Dialog>
@@ -110,7 +105,7 @@ function DatasetDetail({ d }: { d: DatasetNode }) {
   const files = d.files.filter((f) => f !== "dataset.yaml");
   const info: [string, unknown][] = [
     ["Role", ROLE_LABEL[d.role ?? ""] ?? "—"], ["Technique", man.technique], ["Material", man.material], ["Format", man.format],
-    ["Radiation", inst.radiation], ["Wavelength", inst.wavelength_A != null ? `${num(inst.wavelength_A, 10)} Å` : undefined],
+    ["Radiation type", radiationLabel(inst.radiation)], ["Radiation source", inst.radiation_source], ["Wavelength", inst.wavelength_A != null ? `${num(inst.wavelength_A, 10)} Å` : undefined],
     ["Wavelength source", inst.wavelength_source], ["Source", man.source],
   ];
 
@@ -130,7 +125,7 @@ function DatasetDetail({ d }: { d: DatasetNode }) {
       {uploadError && <div className="rounded-md border border-bad/20 bg-bad-soft p-3 text-xs text-bad"><b>Upload rejected.</b> {uploadError}</div>}
 
       {d.valid && (
-        <dl className="grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-line bg-line">
+        <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-line bg-line">
           {info.map(([k, v]) => (
             <div key={k} className="bg-surface px-3 py-2.5">
               <dt className="text-[11px] text-muted">{k}</dt>
@@ -180,21 +175,75 @@ function DatasetDetail({ d }: { d: DatasetNode }) {
   );
 }
 
+type Origin = "files" | "mp" | "cod";
+const ORIGINS: { id: Origin; label: string; hint: string }[] = [
+  { id: "files", label: "Upload files", hint: "A scan or structure from your computer" },
+  { id: "mp", label: "Materials Project", hint: "A computed structure, by mp- id" },
+  { id: "cod", label: "Crystallography Open Database", hint: "A published structure, by COD number" },
+];
+// coreCIF _diffrn_source examples
+const SOURCES = ["sealed X-ray tube", "rotating-anode X-ray tube", "synchrotron", "nuclear reactor", "spallation source", "electron microscope"];
+
+/** The one way in for data: upload files, or bring a structure from Materials Project or COD. */
 function AddDataset({ onDone }: { onDone: (id: string) => void }) {
-  const [f, setF] = useState({ id: "", role: "measured_pattern", technique: "xrd_powder", material: "Si",
-    format: "pdcif", radiation: "CuKa1", wavelength: "", source: "", readme: "" });
+  const [origin, setOrigin] = useState<Origin>("files");
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Where the data comes from">
+        {ORIGINS.map((o) => (
+          <button key={o.id} role="radio" aria-checked={origin === o.id} onClick={() => setOrigin(o.id)}
+            className={cn("rounded-md border px-2.5 py-2 text-left", origin === o.id ? "border-accent bg-accent-soft/60" : "border-line hover:border-line-strong")}>
+            <span className="block text-[12.5px] font-medium">{o.label}</span>
+            <span className="block text-[11px] leading-4 text-muted">{o.hint}</span>
+          </button>
+        ))}
+      </div>
+      {origin === "files" ? <UploadDataset onDone={onDone} /> : <ImportStructure key={origin} origin={origin} onDone={onDone} />}
+    </div>
+  );
+}
+
+const slug = (s: string) => s.toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+
+function UploadDataset({ onDone }: { onDone: (id: string) => void }) {
+  const [f, setF] = useState({ id: "", role: "measured_pattern", technique: "xrd_powder", material: "",
+    format: "pdcif", radiation: "", radiation_source: "", probe: "x-ray", wavelength: "", wavelength_source: "", source: "", readme: "" });
   const [files, setFiles] = useState<File[]>([]);
+  const [facts, setFacts] = useState<FileFacts["found"]>({});
+  const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const measured = f.role === "measured_pattern";
+  const fromFile = (k: keyof FileFacts["found"]) => facts[k] && <Tag tone="ok" className="shrink-0 whitespace-nowrap" title={`read from ${facts[k]!.tag} in the file`}>from file</Tag>;
+
+  async function choose(list: File[]) {
+    setFiles(list); setError(null);
+    const cif = list.find((x) => x.name.toLowerCase().endsWith(".cif"));
+    const next = { ...f, id: f.id || slug(list[0]?.name ?? "") };
+    if (!cif) { setFacts({}); setF(next); return; }
+    setReading(true);
+    try {
+      const r = await api.inspectFile(cif);
+      const v = (k: keyof FileFacts["found"]) => r.found[k] != null ? String(r.found[k]!.value) : "";
+      setFacts(r.found);
+      setF({ ...next, ...(r.role ? { role: r.role, technique: r.role === "measured_pattern" ? "xrd_powder" : "structure" } : {}),
+        ...(r.format ? { format: r.format } : {}), material: v("material").replace(/\s+/g, "") || next.material,
+        radiation: v("radiation") ? radiationLabel(v("radiation"))! : next.radiation,
+        radiation_source: v("radiation_source") || next.radiation_source, probe: v("probe") || next.probe,
+        wavelength: v("wavelength_A") || next.wavelength,
+        wavelength_source: r.found.wavelength_A ? `in the file: ${r.found.wavelength_A.tag}` : next.wavelength_source });
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setReading(false); }
+  }
 
   async function submit() {
     setError(null); setBusy(true);
     try {
+      const inst: Record<string, unknown> = { radiation: f.radiation || null, radiation_source: f.radiation_source || null,
+        probe: f.probe || null, wavelength_A: f.wavelength ? Number(f.wavelength) : null, wavelength_source: f.wavelength_source || null };
       const manifest: Record<string, unknown> = { id: f.id, role: f.role, technique: f.technique, material: f.material,
-        format: f.format, files: ["raw/*"], ...(f.source ? { source: f.source } : {}) };
-      if (measured) manifest.instrument = { radiation: f.radiation, wavelength_A: f.wavelength ? Number(f.wavelength) : null };
+        format: f.format, files: ["raw/*"], ...(f.source ? { source: f.source } : {}),
+        ...(measured ? { instrument: Object.fromEntries(Object.entries(inst).filter(([, v]) => v != null)) } : {}) };
       await api.createDataset(manifest, f.readme || undefined);
       if (files.length) await api.upload(f.id, files);
       onDone(f.id);
@@ -205,58 +254,78 @@ function AddDataset({ onDone }: { onDone: (id: string) => void }) {
 
   return (
     <div className="space-y-3">
-      <Field label="Dataset ID" hint="Lowercase letters, digits and hyphens. Becomes the folder name.">
+      <Field label="Files" hint="A powder scan (.cif, .xy, .csv) or a crystal structure (.cif). What a CIF states about itself fills the form.">
+        <input type="file" multiple onChange={(e) => choose(Array.from(e.target.files ?? []))}
+          className="block w-full text-xs text-muted file:mr-3 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-ink" />
+      </Field>
+      {reading && <p className="text-[11.5px] text-muted">Reading the file…</p>}
+      <Field label="Dataset name" hint="Lowercase letters, digits and hyphens. Becomes the folder name.">
         <input className={cn(inputCls, "font-mono")} placeholder="si-scan-2026-10" value={f.id} onChange={set("id")} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Role">
+        <Field label="What it is">
           <select className={inputCls} value={f.role} onChange={set("role")}>
-            <option value="measured_pattern">Measured pattern</option>
+            <option value="measured_pattern">Measured scan</option>
             <option value="reference_structure">Reference structure</option>
             <option value="reference_value">Reference value</option>
           </select>
         </Field>
-        <Field label="Format">
+        <Field label="File format">
           <select className={inputCls} value={f.format} onChange={set("format")}>
             <option value="pdcif">Powder CIF (pdCIF)</option><option value="cif">Structure CIF</option>
             <option value="xy">XY</option><option value="csv">CSV</option>
           </select>
         </Field>
+        <Field label="Material"><div className="flex items-center gap-2">
+          <input className={inputCls} placeholder="e.g. Si" value={f.material} onChange={set("material")} />{fromFile("material")}</div></Field>
         <Field label="Technique"><input className={inputCls} value={f.technique} onChange={set("technique")} /></Field>
-        <Field label="Material"><input className={inputCls} value={f.material} onChange={set("material")} /></Field>
-        {measured && <>
-          <Field label="Radiation"><input className={inputCls} value={f.radiation} onChange={set("radiation")} /></Field>
-          <Field label="Wavelength (Å)" hint="Leave blank if unknown; runs stop rather than guess.">
-            <input className={cn(inputCls, "font-mono")} placeholder="1.5405929" value={f.wavelength} onChange={set("wavelength")} />
-          </Field>
-        </>}
       </div>
+      {measured && <fieldset className="space-y-3 rounded-md border border-line p-3">
+        <legend className="px-1 text-[11.5px] font-medium text-ink-2">Instrument</legend>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Radiation type" hint="The emission line, as in CIF _diffrn_radiation_type: Cu Kα1, Cu Kα, Mo Kα …">
+            <div className="flex items-center gap-2"><input className={inputCls} placeholder="Cu Kα1" value={f.radiation} onChange={set("radiation")} />
+              {fromFile("radiation")}</div></Field>
+          <Field label="Radiation source" hint="What produced it, as in CIF _diffrn_source.">
+            <div className="flex items-center gap-2"><select className={inputCls} value={f.radiation_source} onChange={set("radiation_source")}>
+              <option value="">Not stated</option>{SOURCES.map((x) => <option key={x} value={x}>{x}</option>)}
+              {f.radiation_source && !SOURCES.includes(f.radiation_source) && <option value={f.radiation_source}>{f.radiation_source}</option>}
+            </select>{fromFile("radiation_source")}</div></Field>
+          <Field label="Wavelength (Å)" hint="Leave blank if unknown; analyses stop rather than guess.">
+            <div className="flex items-center gap-2"><input className={cn(inputCls, "font-mono")} placeholder="1.5405929" value={f.wavelength}
+              onChange={set("wavelength")} />{fromFile("wavelength_A")}</div></Field>
+          <Field label="Where the wavelength comes from" hint="e.g. the instrument's calibration, or a certificate.">
+            <input className={inputCls} value={f.wavelength_source} onChange={set("wavelength_source")} /></Field>
+        </div>
+        <Field label="Probe"><div className="flex items-center gap-2"><select className={inputCls} value={f.probe} onChange={set("probe")}>
+          <option value="x-ray">X-ray</option><option value="neutron">Neutron</option><option value="electron">Electron</option>
+          <option value="">Not stated</option></select>{fromFile("probe")}</div></Field>
+      </fieldset>}
       <Field label="Source"><input className={inputCls} placeholder="DOI or URL" value={f.source} onChange={set("source")} /></Field>
       <Field label="Notes"><textarea className={cn(inputCls, "h-16 py-1.5")} placeholder="Provenance, licence, anything an analyst should know"
         value={f.readme} onChange={set("readme")} /></Field>
-      <Field label="Files">
-        <input type="file" multiple onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-          className="block w-full text-xs text-muted file:mr-3 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-ink" />
-      </Field>
       {error && <div className="rounded-md border border-bad/20 bg-bad-soft p-2.5 text-xs text-bad"><b>Rejected.</b> {error}</div>}
       <div className="flex justify-end border-t border-line pt-3">
-        <Button variant="primary" disabled={!f.id || busy} onClick={submit}>{busy ? "Validating…" : "Create dataset"}</Button>
+        <Button variant="primary" disabled={!f.id || !f.material || busy || reading} onClick={submit}>{busy ? "Validating…" : "Create dataset"}</Button>
       </div>
     </div>
   );
 }
 
-
-function ImportMp({ onDone }: { onDone: (id: string) => void }) {
-  const [id, setId] = useState("mp-149");
-  const imp = useMutation({ mutationFn: () => xrd.importMp(id.trim()), onSuccess: (r) => onDone(r.dataset) });
+function ImportStructure({ origin, onDone }: { origin: "mp" | "cod"; onDone: (id: string) => void }) {
+  const mp = origin === "mp";
+  const [id, setId] = useState(mp ? "mp-149" : "");
+  const imp = useMutation({ mutationFn: () => (mp ? xrd.importMp(id.trim()) : xrd.importCod(id.trim())), onSuccess: (r) => onDone(r.dataset) });
   return (
     <div className="space-y-3">
-      <Field label="Materials Project id" hint="Stored as a reference structure (symmetrized CIF): use it in XRD refinements, overlays and DFT.">
-        <input className={cn(inputCls, "font-mono")} value={id} onChange={(e) => setId(e.target.value)} />
+      <Field label={mp ? "Materials Project id" : "COD number"}
+        hint={mp ? "Saved as a reference structure (symmetrized CIF), usable in analyses, comparisons and simulations."
+          : "Saved as a reference structure with the CIF exactly as published, usable in analyses, comparisons and simulations."}>
+        <input className={cn(inputCls, "font-mono")} placeholder={mp ? "mp-149" : "2300450"} value={id} onChange={(e) => setId(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && id.trim()) imp.mutate(); }} />
       </Field>
       {imp.isError && <p className="text-xs text-bad">{String(imp.error instanceof Error ? imp.error.message : imp.error)}</p>}
-      <div className="flex justify-end"><Button variant="primary" disabled={!id.trim() || imp.isPending} onClick={() => imp.mutate()}>
+      <div className="flex justify-end border-t border-line pt-3"><Button variant="primary" disabled={!id.trim() || imp.isPending} onClick={() => imp.mutate()}>
         {imp.isPending ? "Importing…" : "Import"}</Button></div>
     </div>
   );

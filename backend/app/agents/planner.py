@@ -25,7 +25,7 @@ Coder-visible skills:
 
 
 def make_plan(prompt: str, manifests: list[Manifest], max_steps: int,
-              parent_context: str | None = None) -> Plan:
+              parent_context: str | None = None, on_text=None) -> Plan:
     content = [
         f"Request:\n{prompt}",
         "Selected datasets (manifests):\n" + json.dumps([m.for_agents() for m in manifests], indent=2),
@@ -39,6 +39,7 @@ def make_plan(prompt: str, manifests: list[Manifest], max_steps: int,
         content="\n\n".join(content),
         output=Plan,
         effort="medium",
+        on_text=on_text,
     )
     plan.check_against({m.id for m in manifests}, max_steps)
     for step in plan.steps:

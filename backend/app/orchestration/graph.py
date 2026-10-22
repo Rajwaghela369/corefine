@@ -14,11 +14,12 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import analyst, checks, coder, planner
-from app.agents.llm import LLMError, trace_span
+from app.agents.llm import LLMError
 from app.config import get_settings
 from app.models.contracts import Manifest, Metric, Plan, RunRequest
 from app.models.db import utcnow
 from app.orchestration.events import bus
+from app.orchestration.live import Live
 from app.orchestration.recorder import Recorder
 from app.sandbox.base import OutputLimitError, SandboxSession, get_runner
 from app.storage import datasets
@@ -63,22 +64,31 @@ def _step_file(step, attempt: int, ext: str) -> str:
     return f"step_{step.idx:02d}_{step.name}{v}.{ext}"
 
 
+def _pretty(name: str) -> str:
+    return name.replace("_", " ")
+
+
 def build_graph(ctx: _Ctx):
     s, rec = ctx.settings, ctx.rec
+    live = Live(rec.run_id)
 
     def plan_node(state: RunState) -> RunState:
         rec.run_update(status="planning", started_at=utcnow())
+        # Sandbox first: a missing snapshot or quota error should fail before any Claude call is spent
+        live.activity("sandbox", "Starting a secure sandbox and copying in your data")
+        ctx.sandbox = get_runner().open(state["run_id"])
+        ctx.sandbox.stage_inputs(datasets.staged_inputs(ctx.req.dataset_ids, ctx.store))
         parent_ctx = None
         if ctx.req.parent_run_id:
             parent_ctx = _parent_context(ctx.store, ctx.req.parent_run_id)
-        plan = planner.make_plan(ctx.req.prompt, ctx.manifests, s.MAX_STEPS, parent_ctx)
+        live.activity("planner", "Reading your question and the dataset descriptions, and planning the analysis")
+        with live.draft("planner") as on_text:
+            plan = planner.make_plan(ctx.req.prompt, ctx.manifests, s.MAX_STEPS, parent_ctx, on_text=on_text)
         rec.put("plan.json", plan.model_dump_json(indent=2))
         rec.put("plan.md", planner.plan_markdown(plan))
         rec.run_update(plan=plan.model_dump(), status="running")
         rec.steps_init([(st.idx, st.name) for st in plan.steps])
         rec.log("planner", f"planned {len(plan.steps)} steps: " + ", ".join(st.name for st in plan.steps))
-        ctx.sandbox = get_runner().open(state["run_id"])
-        ctx.sandbox.stage_inputs(datasets.staged_inputs(ctx.req.dataset_ids, ctx.store))
         return {"plan": plan.model_dump(), "cursor": 0, "attempt": 1, "last_code": None, "last_error": None,
                 "produced": {}, "metric_keys": []}
 
@@ -87,9 +97,13 @@ def build_graph(ctx: _Ctx):
         step = plan.steps[state["cursor"]]
         attempt = state["attempt"]
         rec.step_update(step.idx, status="running" if attempt == 1 else "retrying", attempts=attempt, error=None)
-        out = coder.write_step(plan, step, ctx.manifests, step.uses_previous_outputs,
-                               last_code=state.get("last_code") if attempt > 1 else None,
-                               last_error=state.get("last_error") if attempt > 1 else None)
+        live.activity("coder", f"Writing the code for step {step.idx}: {_pretty(step.name)}" if attempt == 1
+                      else f"Fixing the code for step {step.idx} after the last attempt failed (attempt {attempt})",
+                      step=step.idx, attempt=attempt)
+        with live.draft("coder", step=step.idx, attempt=attempt) as on_text:
+            out = coder.write_step(plan, step, ctx.manifests, step.uses_previous_outputs,
+                                   last_code=state.get("last_code") if attempt > 1 else None,
+                                   last_error=state.get("last_error") if attempt > 1 else None, on_text=on_text)
         key = rec.put(f"code/{_step_file(step, attempt, 'py')}", out.code, step.idx)
         rec.step_update(step.idx, code_key=key)
         rec.log("coder", f"step {step.idx} attempt {attempt}: {out.notes}")
@@ -101,6 +115,7 @@ def build_graph(ctx: _Ctx):
         prev = {f"previous/{name}": ctx.store.get(state["produced"][name]) for name in step.uses_previous_outputs}
         if prev:
             ctx.sandbox.stage_inputs(prev)
+        live.activity("sandbox", f"Running step {step.idx} in the sandbox", step=step.idx, attempt=state["attempt"])
         try:
             ctx.last_result = ctx.sandbox.run(state["last_code"], _step_file(step, state["attempt"], "py"),
                                               s.STEP_TIMEOUT_S)
@@ -115,6 +130,8 @@ def build_graph(ctx: _Ctx):
     def check_node(state: RunState) -> RunState:
         plan = Plan.model_validate(state["plan"])
         step = plan.steps[state["cursor"]]
+        live.activity("checker", f"Checking that step {step.idx} produced the files and values it promised",
+                      step=step.idx, attempt=state["attempt"])
         if not state.get("check_ok", True) and state.get("last_error"):
             res = checks.CheckResult(False, state["last_error"], retryable=False)
         else:
@@ -146,6 +163,7 @@ def build_graph(ctx: _Ctx):
 
     def analyse_node(state: RunState) -> RunState:
         rec.run_update(status="analysing")
+        live.activity("checker", "Comparing the result with the certified value and classifying it")
         metrics = _merged_metrics(ctx.store, state["metric_keys"])
         measured = next((m for m in ctx.manifests if m.role == "measured_pattern"), None)
         reference = (measured.reference_values if measured else None) or {}
@@ -166,9 +184,14 @@ def build_graph(ctx: _Ctx):
             note = None if attempt == 1 else (
                 "Your previous report contained numbers the claim checker could not trace: "
                 + json.dumps(claim["untraced"]) + ". Remove or replace them with values from the metrics.")
-            out = analyst.write_report(ctx.req.prompt + (f"\n\n{note}" if note else ""), all_metrics,
-                                       peaks.decode() if peaks else None, plot, ctx.manifests, rule_class, reasons)
+            live.activity("analyst", "Looking at the fit and writing the report" if attempt == 1
+                          else "Rewriting the report without the numbers that could not be checked", attempt=attempt)
+            with live.draft("analyst", attempt=attempt) as on_text:
+                out = analyst.write_report(ctx.req.prompt + (f"\n\n{note}" if note else ""), all_metrics,
+                                           peaks.decode() if peaks else None, plot, ctx.manifests, rule_class, reasons,
+                                           on_text=on_text)
             report = out.report_markdown
+            live.activity("claim_checker", "Checking every number in the report against the run's files", attempt=attempt)
             claim = checks.claim_check(report, allowed)
             rec.log("analyst", f"attempt {attempt}: classification {out.classification}"
                     + ("" if out.agrees_with_rule else f" (rule said {rule_class})"))
@@ -234,8 +257,7 @@ def execute_run(run_id: str, req: RunRequest) -> None:
     try:
         ctx = _Ctx(run_id, req)
         graph = build_graph(ctx)
-        with trace_span(f"run {run_id}", input=req.model_dump()):
-            graph.invoke({"run_id": run_id, "request": req.model_dump()}, {"recursion_limit": 200})
+        graph.invoke({"run_id": run_id, "request": req.model_dump()}, {"recursion_limit": 200})
     except (LLMError, datasets.ManifestError, ValueError) as e:
         _fail(ctx, run_id, str(e))
     except Exception as e:  # noqa: BLE001 — a run must end in a recorded state whatever happens

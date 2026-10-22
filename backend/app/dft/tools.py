@@ -10,7 +10,8 @@ Everything goes into TOOLS_DIR (no root, no system changes) and is verified befo
                standard.djson, written into an SSSP-style JSON so the QE adapter reads them the same way
 
 Commercial codes (VASP) cannot be installed here; their inputs are still generated.
-Install state is kept in TOOLS_DIR/tools.json; each install runs in the background with a log.
+Install state is kept in TOOLS_DIR/tools.json; each install runs in its own detached process with a log, so a
+backend restart (or --reload) does not kill it. On startup, installs whose process is gone are settled from disk.
 """
 
 import hashlib
@@ -19,9 +20,9 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tarfile
-import threading
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,8 +33,6 @@ from app.config import get_settings
 MICROMAMBA_URL = "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-{plat}"
 SSSP_RECORD_FIRST = "e67tc-6b197"   # first version of the SSSP record; the API redirects to the latest version
 MC_API = "https://archive.materialscloud.org/api/records"
-_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tools")
-_lock = threading.Lock()
 
 
 class ToolError(RuntimeError):
@@ -56,7 +55,9 @@ RECIPES: dict[str, dict] = {
     "gpaw": {"label": "GPAW", "kind": "conda", "package": "gpaw", "channel": "conda-forge", "specs": ["gpaw", "gpaw-data"],
              "provides": {"gpaw": "bin/gpaw"}, "license": "GPL-3.0", "size": "about 400 MB",
              "source": "conda-forge (gpaw + gpaw-data PAW setups)"},
+    # conda-forge builds ABINIT for Intel Macs only; Apple Silicon runs that build under Rosetta 2
     "abinit": {"label": "ABINIT", "kind": "conda", "package": "abinit", "channel": "conda-forge",
+               "platform_fallback": {"osx-arm64": "osx-64"},
                "provides": {"abinit": "bin/abinit"}, "license": "GPL-3.0", "size": "about 400 MB",
                "source": "conda-forge (https://anaconda.org/conda-forge/abinit)"},
     "pseudodojo-pbe": {"label": "PseudoDojo NC PBE v0.4 (standard)", "kind": "pseudodojo", "repo": "ONCVPSP-PBE-PDv0.4",
@@ -73,8 +74,12 @@ RECIPES: dict[str, dict] = {
               "provides": {"gsas2": "bin/python"}, "license": "GSAS-II licence (free, open source)", "size": "about 1 GB",
               "source": "github.com/AdvancedPhotonSource/GSAS-II, built from a pinned commit (not on PyPI or conda-forge)"},
     "maud": {"label": "MAUD (Rietveld and microstructure)", "kind": "release", "repo": "luttero/Maud", "tag": "v3.08",
-             "assets": {"linux-64": "Maud_linux_x64.tar.gz", "linux-aarch64": "Maud_linux_aarch64.tar.gz"},
-             "provides": {"maud": "Maud/jdk/bin/java"}, "license": "BSD-3-Clause", "size": "about 300 MB download",
+             "assets": {"linux-64": "Maud_linux_x64.tar.gz", "linux-aarch64": "Maud_linux_aarch64.tar.gz",
+                        "osx-arm64": "Maud_macos_aarch64.dmg.gz", "osx-64": "Maud_macos_x64.dmg.gz"},
+             "provides": {"maud": "Maud/jdk/bin/java"},
+             # the macOS build is an app bundle: jars in Contents/Java, its own Java runtime under Contents/PlugIns/Home
+             "provides_macos": {"maud": "Maud.app/Contents/PlugIns/Home/bin/java"},
+             "license": "BSD-3-Clause", "size": "about 300 MB download",
              "source": "github.com/luttero/Maud release v3.08 (bundled Java), SHA-256 from GitHub's release record"},
     # PseudoDojo's LDA v0.4 table has psp8 files but almost no UPF, so QE gets the JTH PAW table instead
     "jth-lda": {"label": "JTH v1.1 LDA PAW datasets (UPF, for Quantum ESPRESSO)", "kind": "jth", "repo": "ATOMPAW-LDA-JTHv1.1",
@@ -104,8 +109,24 @@ def _state() -> dict:
     return json.loads(p.read_text()) if p.is_file() else {}
 
 
+@contextmanager
+def _locked():
+    """tools.json is written by the backend and by install processes; an advisory file lock keeps writes whole."""
+    with open(tools_dir() / "tools.lock", "w") as fh:
+        try:
+            import fcntl
+        except ImportError:  # Windows: single writer is the common case; accept the small race
+            yield
+            return
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def _set(name: str, **update) -> dict:
-    with _lock:
+    with _locked():
         st = _state()
         st.setdefault(name, {}).update(update, updated=now())
         (tools_dir() / "tools.json").write_text(json.dumps(st, indent=2))
@@ -113,10 +134,12 @@ def _set(name: str, **update) -> dict:
 
 
 def status() -> list[dict]:
+    recover_interrupted()  # an install process that died (killed, out of disk) must not stay "installing" forever
     st = _state()
     out = [{"name": n, **{k: r[k] for k in ("label", "license", "size", "source")}, "installable": True,
             "status": st.get(n, {}).get("status", "not installed"), "message": st.get(n, {}).get("message", ""),
-            "version": st.get(n, {}).get("version")} for n, r in RECIPES.items()]
+            "version": st.get(n, {}).get("version"), "finished": st.get(n, {}).get("finished")}
+           for n, r in RECIPES.items()]
     return out
 
 
@@ -126,9 +149,14 @@ def installed(name: str) -> bool:
 
 # --- paths the adapters and runner use -------------------------------------------
 
+def provides(r: dict) -> dict[str, str]:
+    """What an install puts on disk for this platform (the macOS build of a release can be laid out differently)."""
+    return r.get("provides_macos", r.get("provides", {})) if platform.system() == "Darwin" else r.get("provides", {})
+
+
 def managed_executable(code: str) -> Path | None:
     for name, r in RECIPES.items():
-        rel = r.get("provides", {}).get(code)
+        rel = provides(r).get(code)
         if rel and installed(name):
             p = tools_dir() / ("apps" if r["kind"] == "release" else "envs") / name / rel
             if p.is_file():
@@ -149,17 +177,68 @@ def managed_pseudo_dir(functional: str, kind: str | tuple[str, ...] = ("sssp", "
 
 # --- installing -------------------------------------------------------------------
 
+def _alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def install(name: str, wait: bool = False) -> dict:
     if name not in RECIPES:
         raise ToolError(NOT_INSTALLABLE.get(name, f"no install recipe for {name!r}"))
-    if _state().get(name, {}).get("status") == "installing":
+    cur = _state().get(name, {})
+    if cur.get("status") == "installing" and _alive(cur.get("pid")):
         raise ToolError(f"{name} is already being installed")
-    _set(name, status="installing", message="starting", started=now())
+    _set(name, status="installing", message="starting", started=now(), pid=os.getpid() if wait else None, finished=None)
     if wait:
         _install(name)
     else:
-        _pool.submit(_install, name)
+        log = tools_dir() / "logs" / f"{name}.log"
+        log.parent.mkdir(exist_ok=True)
+        with open(log, "a") as lg:
+            p = subprocess.Popen([sys.executable, "-m", "app.dft.tools", name], cwd=Path(__file__).resolve().parents[2],
+                                 stdout=lg, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+        _set(name, pid=p.pid)
     return _state()[name]
+
+
+def _complete(name: str) -> str | None:
+    """The installed version if the files of an install are all on disk, else None (used after an interruption)."""
+    r = RECIPES[name]
+    if r["kind"] == "conda":
+        prefix = tools_dir() / "envs" / name
+        ok = all((prefix / rel).is_file() for rel in provides(r).values())
+        return _conda_version(prefix, r["package"]) if ok else None
+    if r["kind"] == "release":
+        dest = tools_dir() / "apps" / name
+        return f"{r['repo'].split('/')[-1]} {r['tag']}" if all((dest / p).is_file() for p in provides(r).values()) else None
+    return None  # pseudopotential tables and GSAS-II are cheap to re-check by running the install again
+
+
+def recover_interrupted() -> list[str]:
+    """Settle installs left 'installing' by a process that no longer runs: complete on disk -> installed, else failed."""
+    settled = []
+    for name, st in _state().items():
+        if name not in RECIPES or st.get("status") != "installing" or _alive(st.get("pid")):
+            continue
+        if version := _complete(name):
+            _set(name, status="installed", message="ready", version=version, finished=now(), pid=None)
+        else:
+            _set(name, status="failed", message="interrupted before it finished (the backend stopped); click Retry",
+                 finished=now(), pid=None)
+        settled.append(name)
+    return settled
+
+
+def log_tail(name: str, lines: int = 60) -> str:
+    log = tools_dir() / "logs" / f"{name}.log"
+    return "\n".join(log.read_text(errors="replace").splitlines()[-lines:]) if log.is_file() else ""
 
 
 def _install(name: str) -> None:
@@ -179,9 +258,9 @@ def _install(name: str) -> None:
             version = _install_release(name, r, log)
         else:
             version = _install_sssp(name, r, log)
-        _set(name, status="installed", message="ready", version=version, finished=now())
+        _set(name, status="installed", message="ready", version=version, finished=now(), pid=None)
     except Exception as e:  # noqa: BLE001 — recorded for the UI
-        _set(name, status="failed", message=str(e)[:1500], finished=now())
+        _set(name, status="failed", message=str(e)[:1500], finished=now(), pid=None)
 
 
 def _platform() -> str:
@@ -234,18 +313,20 @@ def _conda_version(prefix: Path, package: str) -> str | None:
 
 def _install_conda(name: str, r: dict, log: Path) -> str:
     prefix = tools_dir() / "envs" / name
-    complete = all((prefix / rel).is_file() for rel in r["provides"].values()) and _conda_version(prefix, r["package"])
+    complete = all((prefix / rel).is_file() for rel in provides(r).values()) and _conda_version(prefix, r["package"])
     if not complete:
         _set(name, message="getting micromamba")
         mm = micromamba(log)
         env = {**os.environ, "MAMBA_ROOT_PREFIX": str(tools_dir() / "mamba-root")}
         _set(name, message=f"installing {r['package']} from {r['channel']} (this downloads a few hundred MB)")
         with open(log, "a") as lg:
+            plat = r.get("platform_fallback", {}).get(_platform())
             p = subprocess.run([str(mm), "create", "-y", "-p", str(prefix), "-c", r["channel"], "--override-channels",
-                                *r.get("specs", [r["package"]])], stdout=lg, stderr=subprocess.STDOUT, env=env, timeout=3600)
+                                *(["--platform", plat] if plat else []), *r.get("specs", [r["package"]])],
+                               stdout=lg, stderr=subprocess.STDOUT, env=env, timeout=3600)
         if p.returncode != 0:
             raise ToolError(f"micromamba exited {p.returncode}; see {log}")
-    for rel in r["provides"].values():
+    for rel in provides(r).values():
         if not (prefix / rel).is_file():
             raise ToolError(f"{r['package']} installed but {rel} is missing")
         missing = missing_libraries(prefix / rel)
@@ -395,6 +476,26 @@ def _install_gsas2(name: str, r: dict, log: Path) -> str:
     return f"GSAS-II {r['commit'][:10]}"
 
 
+def _unpack_dmg(gz: Path, dest: Path, log: Path) -> None:
+    """macOS disk image (gzipped): mount it read-only and out of sight, copy the app bundle out, unmount."""
+    import gzip
+    import tempfile
+
+    dmg = gz.with_suffix("")  # x.dmg.gz -> x.dmg
+    with gzip.open(gz) as src, open(dmg, "wb") as out:
+        shutil.copyfileobj(src, out, 1 << 20)
+    mnt = Path(tempfile.mkdtemp(prefix="corefine-dmg-"))
+    with open(log, "a") as lg:
+        subprocess.run(["hdiutil", "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", str(mnt), str(dmg)],
+                       stdout=lg, stderr=subprocess.STDOUT, check=True, timeout=600)
+        try:
+            for app in mnt.glob("*.app"):  # ditto keeps the bundle's permissions, symlinks and code signature
+                subprocess.run(["ditto", str(app), str(dest / app.name)], stdout=lg, stderr=subprocess.STDOUT, check=True, timeout=1800)
+        finally:
+            subprocess.run(["hdiutil", "detach", str(mnt)], stdout=lg, stderr=subprocess.STDOUT, timeout=120)
+            dmg.unlink(missing_ok=True)
+
+
 def _install_release(name: str, r: dict, log: Path) -> str:
     """A GitHub release asset, checked against the SHA-256 GitHub records for it, unpacked under TOOLS_DIR/apps."""
     asset = r["assets"].get(_platform())
@@ -417,9 +518,16 @@ def _install_release(name: str, r: dict, log: Path) -> str:
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
     _set(name, message="unpacking")
-    with tarfile.open(f) as tar:
-        tar.extractall(dest, filter="data", members=[m for m in tar.getmembers() if "/._" not in "/" + m.name])
-    for rel_path in r["provides"].values():
+    if asset.endswith(".dmg.gz"):
+        _unpack_dmg(f, dest, log)
+    else:
+        with tarfile.open(f) as tar:
+            tar.extractall(dest, filter="data", members=[m for m in tar.getmembers() if "/._" not in "/" + m.name])
+    for rel_path in provides(r).values():
         if not (dest / rel_path).is_file():
             raise ToolError(f"{rel_path} missing after unpacking")
     return f"{r['repo'].split('/')[-1]} {r['tag']}"
+
+
+if __name__ == "__main__":  # the detached install process started by install()
+    _install(sys.argv[1])

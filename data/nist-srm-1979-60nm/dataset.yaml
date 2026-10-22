@@ -5,7 +5,8 @@ material: ZnO
 format: pdcif
 files: [raw/*_60_nm_*.cif]
 instrument:
-  radiation: synchrotron      # file: _diffrn_radiation_type synchrotron (APS 11-BM)
+  radiation_source: synchrotron  # coreCIF _diffrn_source; the file puts it in _diffrn_radiation_type (APS 11-BM)
+  probe: x-ray                # file: _diffrn_radiation_probe x-ray
   wavelength_A: 0.41419       # file: _diffrn_radiation_wavelength 0.414190 (_diffrn_radiation_wavelength_determination refined)
   wavelength_source: "in each file: _diffrn_radiation_wavelength (refined by NIST)"
   ka2_present: false          # monochromatic synchrotron beam

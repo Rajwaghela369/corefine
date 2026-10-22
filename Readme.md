@@ -11,9 +11,8 @@ CoRefine puts both in one place:
 |---|---|---|
 | **Experiment · XRD** | Agents plan an analysis of raw powder-diffraction data, write the code, run it in a sandbox and explain the result. | anyone with a scan |
 | **Theory · DFT** | Pick a material. CoRefine plans the calculation, writes checked inputs for six codes, installs the open-source ones, runs them on your laptop and shows each code's band gap and convergence. | anyone who wants a DFT number they can trust, including people with no DFT code installed yet |
-| **Theory ↔ Experiment** | The lattice constant from the scan next to the lattice constant from each code, with the differences, and the scan overlaid with what each model predicts. | both, in the same meeting |
 
-One rule runs through all three: **language models plan and explain, code produces numbers.** No
+One rule runs through both: **language models plan and explain, code produces numbers.** No
 LLM writes an input file, and no number reaches a report unless a file or a database row backs it.
 
 > **New here?** Start with [docs/GUIDE.md](docs/GUIDE.md): the idea in one minute, what each screen is for,
@@ -26,7 +25,7 @@ LLM writes an input file, and no number reaches a report unless a file or a data
 1. [Try it on your laptop](#try-it-on-your-laptop)
 2. [Experiment: agentic XRD refinement](#experiment-agentic-xrd-refinement)
 3. [Theory: DFT for every code, for everyone](#theory-dft-for-every-code-for-everyone)
-4. [Theory ↔ Experiment](#theory--experiment)
+4. [Your structure against a real scan](#your-structure-against-a-real-scan)
 5. [Where the calculations run](#where-the-calculations-run)
 6. [Configuration](#configuration)
 7. [Project layout](#project-layout)
@@ -66,10 +65,9 @@ Then try this five-minute tour:
    `backend/.local/tools/`, with no admin rights and nothing else on your system touched.
 2. Search `GaAs`, pick the stable phase and click **Generate**. You get inputs for every code, each
    one read back and checked.
-3. Open **Runs** and run it. Each code's band gap appears under **Overview**; **Theory ↔ Experiment** shows how each step went.
-4. **Your own scan:** in **Storage** click **Scan** and pick a `.xy`/`.xye`/`.csv` file. See [docs/GUIDE.md](docs/GUIDE.md#using-your-own-scan).
-5. **Lab → Experiment · XRD** has the silicon scans. **Lab → Theory ↔ Experiment** puts both sides
-   together.
+3. Open **Runs** and run it. Each code's band gap appears under **Overview**.
+4. **Your own scan:** in **Data** click **Scan** and pick a `.xy`/`.xye`/`.csv` file. See [docs/GUIDE.md](docs/GUIDE.md#using-your-own-scan).
+5. **Analyse** has the silicon scans.
 
 What works where:
 
@@ -121,7 +119,7 @@ It reads only through tools, and every number it states must come from a tool re
   licence, checksum, wavelength and its source, temperature, reference-value source and uncertainty;
   it lists what is present and missing, it does not grade FAIRness);
 - theory: `list_dft_sets`, `get_dft_set` (request, defaults, checks, results, studies);
-- both: `theory_vs_experiment`, `compare_pattern`, `identify_phase`;
+- patterns: `compare_pattern`, `identify_phase`;
 - `start_run` proposes a run; nothing starts until you confirm.
 
 It says plainly what CoRefine cannot do yet: ARPES and band-structure comparison, surface slabs,
@@ -214,11 +212,10 @@ the spec errors found while building, and the design decisions.
 | Database | SQLite | Neon Postgres |
 | Search | local Qdrant + FastEmbed | Qdrant Cloud |
 | Sandbox | subprocess (network blocked by hook, **not** isolated) | Daytona, `network_block_all` |
-| Tracing | off | Langfuse Cloud |
 | LLM | Anthropic API (key needed) | Anthropic API |
 
 In cloud mode, a missing key stops startup and the error names it. `GET /health` (or
-`http://localhost:5173/api/health`) checks Neon, S3, Qdrant, Daytona, Anthropic and Langfuse. In
+`http://localhost:5173/api/health`) checks Neon, S3, Qdrant, Daytona and Anthropic. In
 local mode it names the local stand-in it is using for each.
 
 ---
@@ -327,8 +324,7 @@ the most accurate one, the decision and the reason for it, then the same for the
 settings to use. The explanation is rebuilt from the stored points with the study's own rule, so older
 studies show it too, and points appear live while a study is running. The codes sit side by side below.
 
-*The equation-of-state and Raman studies below remain in the backend and API (`/dft/jobs/{id}/studies/…`, the
-co-pilot's `theory_vs_experiment`) but are no longer shown in the UI, which concentrates on runs, band gaps and
+*The equation-of-state and Raman studies below remain in the backend and API (`/dft/jobs/{id}/studies/…`) but are no longer shown in the UI, which concentrates on runs, band gaps and
 convergence.*
 
 **Equation of state across codes.** Seven volumes from 94 to 106 % (the Δ-test protocol), a
@@ -412,26 +408,9 @@ Each set is a folder with one subfolder per code, plus `checks.json`, `provenanc
 
 ---
 
-## Theory ↔ Experiment
+## Your structure against a real scan
 
-This is where the two halves meet. It is useful to a theorist who has never refined a scan and to an
-experimentalist who has never run DFT.
-
-**How each side got its answer.** For one material, *Lab → Theory ↔ Experiment* tells both stories side by side,
-read top to bottom. Each step says who took it (a language model, plain code or a scientific program), what it did,
-the reason recorded at the time, and any retries or automatic fixes.
-
-- **Experiment:** inputs (scan and reference structure, with the answer hidden) → plan (Claude, or a fixed recipe for
-  GSAS-II/MAUD) → each step with its goal, status and attempts → comparison with the certificate (code) → report
-  and claim check. Every agent's notes from the experiment log open underneath.
-- **Theory:** structure source → every setting with its reason (your request, a CoRefine rule or Materials Project) →
-  inputs for six codes and their read-back checks → each code's SCF run (iterations, gap, any self-heal) → band gaps
-  next to Materials Project's.
-- **Where the two meet:** the lattice parameter the calculation assumed against the refined measurement.
-
-Everything on the page is read from run and set files (`GET /bridge/story?material=…`).
-
-**Your structure against a real scan.** Open any measured pattern in Storage and choose a model
+Open any measured pattern in Storage and choose a model
 structure: a DFT equilibrium structure, a COD or Materials Project entry, anything in Storage.
 CoRefine then:
 
@@ -478,7 +457,7 @@ mode.
 | Group | Keys |
 |---|---|
 | Agents | `ANTHROPIC_API_KEY`, `MODEL_MAIN`, `MODEL_FAST` |
-| Cloud mode | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `DATABASE_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `EMBED_PROVIDER`, `EMBED_MODEL`, `EMBED_DIM`, `DAYTONA_API_KEY`, `DAYTONA_SNAPSHOT`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` |
+| Cloud mode | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `DATABASE_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `EMBED_PROVIDER`, `EMBED_MODEL`, `EMBED_DIM`, `DAYTONA_API_KEY`, `DAYTONA_SNAPSHOT` |
 | Materials | `MP_API_KEY` (a current Materials Project key) |
 | Your own DFT builds | `EXCITING_ROOT`, `QUESTAAL_BIN`, `QUESTAAL_LIB_ROOT` (Spack builds), `QE_PSEUDO_DIR`, `VASP_PP_PATH` |
 | Compute | `COMPUTE_CONFIG` (default `backend/compute.yaml`) |
@@ -498,10 +477,10 @@ backend/
   app/xrd/            peak fitting, model-vs-scan comparison, phase ID, engine wrappers
   app/dft/            planner, workflow, studies, one adapter per code in codes/, tools.py installer
   app/storage/        files, database, datasets, code metadata checks (fair.py)
-  app/api/            FastAPI routes, including /bridge/story
+  app/api/            FastAPI routes
   skills/             the XRD skill text and the gold analysis
   scripts/            fetch_data, setup, dft_inputs (command line)
-frontend/src/         React app: views/ (Lab, XRD, DFT, Storage, Theory ↔ Experiment), panels/
+frontend/src/         React app: views/ (Home, Data, Analyse, Simulate, History, Software), panels/ (new analysis, assistant)
 docs/                 SPEC.md and SPEC_CORRECTIONS.md (what the build found wrong in the spec)
 ```
 
@@ -510,7 +489,7 @@ docs/                 SPEC.md and SPEC_CORRECTIONS.md (what the build found wron
 ## Tests
 
 ```bash
-cd backend && uv run pytest        # 115 tests; LLM mocked, everything else real
+cd backend && uv run pytest        # 137 tests; LLM mocked, everything else real
 uv run pytest -m integration       # the 3 that call real services (keys needed)
 ```
 
@@ -522,15 +501,14 @@ uv run pytest -m integration       # the 3 that call real services (keys needed)
 - a full run that recovers from a broken first script and from an invented number in the report;
 - the SSE stream.
 
-**DFT and bridge side:**
+**DFT side:**
 - every adapter's write-and-read-back on several materials;
 - the Materials Project ID handling;
 - result parsing against real output files (exciting from a cluster, Questaal, GPAW and ABINIT kept
   as fixtures), Questaal's automatic restart, and the Slurm flow against a fake cluster;
 - the convergence rule, the EOS fit and the Δ-gauge;
 - Raman selection rules;
-- peak matching, scale fitting and phase identification;
-- the bridge aggregation.
+- peak matching, scale fitting and phase identification.
 
 ---
 
@@ -572,4 +550,4 @@ uv run pytest -m integration       # the 3 that call real services (keys needed)
 - SSSP: Prandini *et al.*, *npj Comput. Mater.* **4**, 72 (2018), Materials Cloud Archive.
 - PseudoDojo: van Setten *et al.*, *Comput. Phys. Commun.* **226**, 39 (2018).
 - Δ-test and WIEN2k reference: Lejaeghere *et al.*, *Science* **351**, aad3000 (2016), via `ase.collections.dcdft`.
-- Built on ASE, spglib, pymatgen, phonopy, gemmi, lmfit, excitingtools, FastAPI, LangGraph, React and uPlot.
+- Built on ASE, spglib, pymatgen, phonopy, gemmi, lmfit, excitingtools, FastAPI, LangChain, LangGraph, React and uPlot.

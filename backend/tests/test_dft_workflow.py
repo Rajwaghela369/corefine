@@ -116,3 +116,23 @@ def test_planner_uses_is_magnetic():
     assert any(d.field == "spin" and d.source == "materials_project" for d in nm.decisions)
     mag = planner.rule_plan({"id": "mp-x", "nsites": 1, "ordering": "Unknown", "is_magnetic": True}, SI.cell[:])
     assert mag.blocked
+
+
+@pytest.mark.parametrize("run", [True, False])
+def test_workflow_pauses_before_runs_and_resumes_them_in_turn(tmp_path, monkeypatch, run):
+    monkeypatch.setattr(workflow.materials, "get", lambda i: {"id": i, "formula": "Si", "nsites": 2, "is_metal": False,
+                                                              "band_gap_eV": 0.6, "ordering": "NM"})
+    monkeypatch.setattr(workflow.sources, "load", lambda s, **kw: type("S", (), {"atoms": SI})())
+    monkeypatch.setattr(workflow.pipeline, "prepare", lambda req, d: {
+        "checks": {"passed": True}, "provenance": {"generated": ["gpaw", "vasp"]}})
+    monkeypatch.setattr(workflow.execute, "load_targets", lambda: {"local": {"codes": {"gpaw": {}}}})
+    states, started = {}, []
+    monkeypatch.setattr(workflow.execute, "write_state", lambda d, c, **kw: states.setdefault(c, []).append(kw["status"]))
+    monkeypatch.setattr(workflow.execute, "start", lambda d, c, target, wait: started.append(c))
+    monkeypatch.setattr(workflow.execute, "all_states", lambda d: {})
+
+    out = workflow.start(tmp_path / "si", "mp-149", kmesh=(2, 2, 2), run=run, wait=True)
+    assert out["checks_passed"] and out["plan"].request.kmesh == (2, 2, 2)
+    assert out["runs"] == (["gpaw"] if run else [])          # vasp has no local program, so it is not run
+    assert started == (["gpaw"] if run else []) and states == ({"gpaw": ["waiting"]} if run else {})
+    assert (tmp_path / "si" / "summary.json").is_file() is run

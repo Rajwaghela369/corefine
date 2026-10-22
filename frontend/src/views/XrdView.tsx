@@ -1,233 +1,26 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BrainCircuit, Columns3, FileText, LayoutDashboard, LineChart, Table2, X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { api, chatStream, dft, type ClaimCheck, type Engine, type GroupRun, type GroupView } from "../api/client";
+import { useQuery } from "@tanstack/react-query";
+import { Bot, BrainCircuit, Columns3, FileText, LayoutDashboard, LineChart, Table2, X } from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
+import { api, type GroupRun, type GroupView } from "../api/client";
+import { ClaimBadge } from "../components/ClaimBadge";
 import { Legend, Node } from "../components/Flow";
+import { LiveReasoning, LiveStatus } from "../components/LiveReasoning";
+import { friendlyError, radiationLabel, runTitle, verdict } from "../components/labels";
+import { useDetailed } from "../components/prefs";
 import { Dot, Sections } from "../components/Sections";
-import { Button, Empty, PanelHeader, Status, Tag, clock, cn, inputCls } from "../components/ui";
-import { Welcome, WelcomeSection } from "../components/Welcome";
+import { Button, Empty, Status, Tag, type Tone, clock, cn, duration } from "../components/ui";
 import { XrdChart, type Curve, type Overlay } from "../components/XrdChart";
-import { ClaimBadge } from "../panels/ChatPanel";
+import { useLiveFeed } from "../useLiveFeed";
 import { DataPane, PlotsPane, ReportPane } from "./Panes";
 
 export const ENGINE_COLOR: Record<string, string> = { agents: "#121826", gsas2: "#c2410c", maud: "#15803d" };
-const ENGINE_LABEL: Record<string, string> = { agents: "Agents", gsas2: "GSAS-II", maud: "MAUD" };
-const METHOD: Record<string, string> = { agents: "Claude writes and runs the fitting code", gsas2: "Rietveld refinement (APS)",
-  maud: "Rietveld + microstructure (Lutterotti)" };
 const f = (v: number | null | undefined, d = 6) => (v == null ? "—" : v.toFixed(d));
 const live = (s: string) => ["queued", "planning", "running", "analysing", "retrying"].includes(s);
 
-/** Experiment · XRD, laid out like Theory · DFT: the form and the list of analyses on the left, the selected analysis
- *  with its header, summary cells and tabs on the right. */
-export function XrdView({ session, runId, setRunId }: { session: string; runId: string | null; setRunId: (id: string | null) => void }) {
-  // a ?tab= link opens that tab once; read it before the address bar is rewritten
-  const [tab] = useState(() => new URLSearchParams(window.location.search).get("tab") ?? undefined);
-  return (
-    <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
-      <div className="min-h-0 border-r border-line"><XrdForm session={session} selected={runId} onSelect={setRunId} /></div>
-      <div className="flex min-h-0 flex-col">
-        {runId ? <AnalysisWorkspace key={runId} id={runId} tab={tab} onClose={() => setRunId(null)} /> : <XrdWelcome onOpen={setRunId} />}
-      </div>
-    </div>
-  );
-}
-
-// --- left: form and analyses -------------------------------------------------------------
-
-function XrdForm({ session, selected, onSelect }: { session: string; selected: string | null; onSelect: (id: string) => void }) {
-  const qc = useQueryClient();
-  const ds = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
-  const measured = (ds.data ?? []).filter((d) => d.valid && d.role === "measured_pattern");
-  const refs = (ds.data ?? []).filter((d) => d.valid && d.role === "reference_structure");
-  const [scan, setScan] = useState("");
-  const [ref, setRef] = useState("");
-  const scanId = scan || measured[0]?.id || "";
-  const material = measured.find((d) => d.id === scanId)?.material;
-  const matching = refs.filter((r) => r.material === material);
-  const refId = ref && refs.some((r) => r.id === ref) ? ref : matching[0]?.id ?? "";
-  useEffect(() => { setRef(""); }, [scanId]);
-  const manifest = useQuery({ queryKey: ["manifest", scanId], queryFn: () => api.manifest(scanId), enabled: !!scanId });
-  const inst = (manifest.data?.instrument ?? {}) as Record<string, unknown>;
-  const engines = useQuery({ queryKey: ["engines"], queryFn: api.engines,
-    refetchInterval: (q) => (q.state.data?.some((e) => e.install?.status === "installing") ? 3000 : false) });
-  const [picked, setPicked] = useState<Engine[] | null>(null);
-  const available = (engines.data ?? []).filter((e) => e.available).map((e) => e.name);
-  const tools = (picked ?? available.filter((e) => e !== "agents")).filter((e) => available.includes(e));
-  const [goal, setGoal] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const toggle = (e: Engine) => setPicked((p) => { const cur = p ?? tools; return cur.includes(e) ? cur.filter((x) => x !== e) : [...cur, e]; });
-  const start = useMutation({
-    mutationFn: () => api.startRun({ dataset_ids: [scanId, refId].filter(Boolean), engines: tools, parent_run_id: null, session_id: session,
-      prompt: goal.trim() || `Refine the lattice parameters of ${material ?? "the sample"} from ${scanId} and compare them with the certified values` }),
-    onSuccess: (r) => { setError(null); qc.invalidateQueries({ queryKey: ["runs"] }); onSelect(r.id); },
-    onError: (e) => setError(e instanceof Error ? e.message : String(e)),
-  });
-  const install = useMutation({ mutationFn: (tool: string) => dft.installTool(tool),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["engines"] }), onError: (e) => setError(String(e)) });
-
-  return (
-    <div className="flex h-full flex-col bg-surface">
-      <PanelHeader title="New XRD analysis" meta="powder diffraction" />
-      <div className="space-y-4 overflow-auto border-b border-line p-4">
-        <div>
-          <div className="mb-1.5 text-xs font-medium text-ink-2">Measured scan</div>
-          {measured.length ? <select className={inputCls} value={scanId} onChange={(e) => setScan(e.target.value)}>
-            {measured.map((d) => <option key={d.id} value={d.id}>{d.id}{d.material ? ` · ${d.material}` : ""}</option>)}</select>
-            : <p className="text-[11px] text-muted">No measured patterns in Storage yet. In Storage, <b>Scan</b> imports your own file.</p>}
-          {scanId && manifest.data && <p className="mt-1 text-[10.5px] leading-4 text-muted">
-            {String(inst.radiation ?? "")} · λ = {String(inst.wavelength_A ?? "?")} Å {inst.ka2_present ? "· Kα1 + Kα2" : ""}
-            {manifest.data.reference_values ? " · certified value on file (hidden from the analysis)" : ""}</p>}
-        </div>
-        <div>
-          <div className="mb-1.5 text-xs font-medium text-ink-2">Reference structure</div>
-          {refs.length ? <select className={inputCls} value={refId} onChange={(e) => setRef(e.target.value)}>
-            {!refId && <option value="">none for {material}</option>}
-            {refs.map((d) => <option key={d.id} value={d.id}>{d.id}{d.material ? ` · ${d.material}` : ""}{d.material === material ? "" : " (other material)"}</option>)}</select>
-            : <p className="text-[11px] text-muted">No reference structures in Storage yet.</p>}
-          <p className="mt-1 text-[10.5px] text-muted">Space group, atom positions and the starting cell; the refinement starts from it.</p>
-        </div>
-        <div>
-          <div className="mb-1.5 flex items-baseline justify-between">
-            <span className="text-xs font-medium text-ink-2">Analysis tools</span>
-            <span className="text-[11px] text-muted">{available.length} of {engines.data?.length ?? 3} available here</span>
-          </div>
-          {(engines.data ?? []).filter((e) => !e.available && e.tool).map((e) => (
-            <div key={e.name} className="mb-1.5 rounded-md border border-line bg-subtle/60 p-2 text-[11px] leading-4">
-              <div className="flex items-center justify-between gap-2">
-                <span><span className="font-medium text-ink-2">{e.label}</span> <span className="text-muted">not installed</span></span>
-                <Button size="sm" variant="secondary" disabled={e.install?.status === "installing" || install.isPending}
-                  onClick={() => install.mutate(e.tool!)}>{e.install?.status === "installing" ? "Installing…" : "Install"}</Button>
-              </div>
-              <div className="text-muted">{e.install?.license}, {e.install?.size}</div>
-              {e.install?.status === "installing" && <div className="text-accent">{e.install.message}</div>}
-              {e.install?.status === "failed" && <div className="text-bad">Install failed: {e.install.message}</div>}
-            </div>))}
-          <div className="grid grid-cols-3 gap-2">
-            {(engines.data ?? []).map((e) => (
-              <button key={e.name} onClick={() => toggle(e.name)} disabled={!e.available} title={e.available ? e.about : e.reason}
-                className={cn("rounded-md border px-2 py-1.5 text-left text-xs disabled:opacity-40",
-                  tools.includes(e.name) ? "border-accent bg-accent-soft text-accent" : "border-line-strong text-ink-2")}>
-                <div className="font-medium">{e.label}</div>
-                <div className="text-[10px] leading-3 text-muted">{METHOD[e.name]}</div>
-              </button>))}
-          </div>
-          <p className="mt-1.5 text-[11px] leading-4 text-muted">Pick more than one to compare them on the same scan. Every tool records
-            each decision and step, shown under Reasoning.</p>
-        </div>
-        {tools.includes("agents") && <textarea className={cn(inputCls, "h-14 py-1.5")} value={goal} onChange={(e) => setGoal(e.target.value)}
-          placeholder="Instructions for the agents (optional), e.g. fit Kα1/Kα2 doublets and refine a with a zero shift" />}
-        <Button variant="primary" className="w-full" disabled={!scanId || !refId || !tools.length || start.isPending} onClick={() => start.mutate()}>
-          {start.isPending ? "Starting…" : !refId ? "Pick a reference structure" : !tools.length ? "Pick at least one tool"
-            : `Analyse ${scanId} with ${tools.map((t) => ENGINE_LABEL[t]).join(" + ")}`}</Button>
-        <Assistant session={session} datasets={[scanId, refId].filter(Boolean)} />
-        {error && <div className="rounded-md border border-bad/20 bg-bad-soft p-2.5 text-xs text-bad"><b>Refused.</b> {error}</div>}
-      </div>
-      <div className="flex h-9 shrink-0 items-center border-b border-line px-4 text-xs font-medium">Analyses</div>
-      <div className="min-h-0 flex-1 overflow-auto"><AnalysisList selected={selected} onSelect={onSelect} /></div>
-    </div>
-  );
-}
-
-function Assistant({ session, datasets }: { session: string; datasets: string[] }) {
-  const [q, setQ] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [answer, setAnswer] = useState<{ text: string; claim?: ClaimCheck; tools: string[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  async function ask() {
-    setBusy(true); setError(null); setAnswer({ text: "", tools: [] });
-    try {
-      for await (const ev of chatStream(session, q.trim(), datasets)) {
-        if (ev.event === "tool_call") setAnswer((a) => ({ ...(a ?? { text: "" }), tools: [...(a?.tools ?? []), ev.data.name] }));
-        if (ev.event === "answer") setAnswer((a) => ({ text: ev.data.content, claim: ev.data.claim_check, tools: a?.tools ?? [] }));
-        if (ev.event === "error") throw new Error(ev.data.message);
-      }
-    } catch (e) { setAnswer(null); setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
-  }
-  return (
-    <details className="rounded-md border border-line">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-ink-2">Or ask the assistant</summary>
-      <div className="space-y-2 border-t border-line p-3">
-        <textarea className={cn(inputCls, "h-14 py-1.5")} value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Is this dataset documented well enough to reuse? Which tool fits the scan better?" />
-        <Button size="sm" variant="secondary" disabled={!q.trim() || busy} onClick={ask}>{busy ? "Answering…" : "Ask"}</Button>
-        {answer && <div className="space-y-1 text-[12px] leading-5 text-ink-2">
-          {answer.tools.length > 0 && <div className="text-[10.5px] text-faint">looked at: {[...new Set(answer.tools)].join(", ")}</div>}
-          <div className="whitespace-pre-wrap">{answer.text}</div>{answer.claim && <ClaimBadge c={answer.claim} />}</div>}
-        {error && <p className="text-[11px] text-bad">{error}</p>}
-      </div>
-    </details>
-  );
-}
-
-interface Item { key: string; runs: { id: string; engine: string; status: string; a?: number }[]; dataset: string; prompt: string; started: string | null }
-
-function AnalysisList({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
-  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs,
-    refetchInterval: (q) => (q.state.data?.some((r) => live(r.status)) ? 3000 : false) });
-  const items = useMemo(() => {
-    const m = new Map<string, Item>();
-    for (const r of runs.data ?? []) {
-      const key = r.group_id ?? r.id;
-      const it = m.get(key) ?? { key, runs: [], dataset: r.dataset_ids[0], prompt: r.prompt, started: r.started_at };
-      it.runs.push({ id: r.id, engine: r.engine ?? "agents", status: r.status, a: r.headline?.a_refined });
-      m.set(key, it);
-    }
-    return [...m.values()];
-  }, [runs.data]);
-  if (runs.data && !items.length) return <Empty title="No analyses yet">Start one above; it will be listed here.</Empty>;
-  return (
-    <ul className="divide-y divide-line">
-      {items.map((it) => {
-        const ids = it.runs.map((r) => r.id);
-        const sel = !!selected && ids.includes(selected);
-        return (
-          <li key={it.key}>
-            <button onClick={() => onSelect(ids[ids.length - 1])} className={cn("w-full px-4 py-2.5 text-left hover:bg-subtle", sel && "bg-accent-soft hover:bg-accent-soft")}>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[12px] font-semibold">{it.dataset}</span>
-                <span className="ml-auto flex gap-1">{it.runs.slice().reverse().map((r) => (
-                  <span key={r.id} className="rounded px-1 text-[10.5px] font-medium text-white" style={{ background: ENGINE_COLOR[r.engine] }}
-                    title={`${r.id} · ${r.status}`}>{ENGINE_LABEL[r.engine]}{r.status === "failed" ? " ✕" : live(r.status) ? " …" : ""}</span>))}</span>
-              </div>
-              <div className="mt-0.5 flex gap-3 font-mono text-[11px] text-muted">
-                {it.runs.slice().reverse().filter((r) => r.a).map((r) => <span key={r.id}>a = {r.a!.toFixed(5)}</span>)}
-                <span className="ml-auto font-sans">{clock(it.started)}</span></div>
-            </button>
-          </li>);
-      })}
-    </ul>
-  );
-}
-
-function XrdWelcome({ onOpen }: { onOpen: (id: string) => void }) {
-  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
-  return (
-    <Welcome title="Experiment: XRD analysis"
-      intro="Pick a measured powder scan and the tools to analyse it with: agents that write the fitting code, GSAS-II, MAUD, or several at once
-        to compare. Every analysis records its reasoning: each decision before fitting, each refinement stage and what it changed,
-        the comparison with the certified value, and a report whose numbers are traced to files."
-      steps={[
-        { icon: Table2, title: "Choose the scan", text: "A measured pattern and a reference structure from Storage; its wavelength and Kα2 facts come from its manifest." },
-        { icon: Columns3, title: "Choose the tools", text: "Agents, GSAS-II, MAUD. With more than one, the results are compared on one plot and one table." },
-        { icon: BrainCircuit, title: "Follow the reasoning", text: "Each step, who took it and why, with retries and warnings, then the result against the certificate." },
-      ]}>
-      {(runs.data?.length ?? 0) > 0 && <WelcomeSection title="Recent analyses">
-        <div className="grid gap-2 sm:grid-cols-2">
-          {runs.data!.slice(0, 6).map((r) => (
-            <button key={r.id} onClick={() => onOpen(r.id)} className="rounded-lg border border-line bg-surface px-3 py-2.5 text-left hover:border-accent">
-              <div className="flex items-center gap-2"><span className="font-mono text-[12px] font-semibold">{r.dataset_ids[0]}</span>
-                <Tag>{ENGINE_LABEL[r.engine ?? "agents"]}</Tag><span className="ml-auto"><Status status={r.status} /></span></div>
-              {r.headline && <div className="mt-0.5 font-mono text-[11.5px] text-muted">a = {r.headline.a_refined.toFixed(6)} Å</div>}
-            </button>))}
-        </div>
-      </WelcomeSection>}
-    </Welcome>
-  );
-}
-
 // --- right: one analysis (one run, or a group of runs on the same scan) ------------------------
 
-function AnalysisWorkspace({ id, tab, onClose }: { id: string; tab?: string; onClose: () => void }) {
+export function AnalysisWorkspace({ id, tab, onClose, onAsk }: { id: string; tab?: string; onClose: () => void; onAsk: (q: string) => void }) {
+  const detailed = useDetailed();
   const run = useQuery({ queryKey: ["run", id], queryFn: () => api.run(id) });
   const key = run.data ? run.data.group_id ?? run.data.id : null;
   const g = useQuery({ queryKey: ["group", key], queryFn: () => api.group(key!), enabled: !!key,
@@ -238,28 +31,41 @@ function AnalysisWorkspace({ id, tab, onClose }: { id: string; tab?: string; onC
   const anyLive = d.runs.some((r) => live(r.status));
   const failed = d.runs.filter((r) => r.status === "failed").length;
   const cert = d.certified ?? {};
+  const title = run.data ? runTitle({ title: run.data.plan?.title, prompt: run.data.prompt }) : d.material ?? "";
+  const first = d.runs[0];
   const sections = [
     { key: "overview", label: "Overview", icon: LayoutDashboard, badge: anyLive ? <Dot tone="run" /> : undefined, body: <OverviewPane d={d} /> },
     { key: "reasoning", label: "Reasoning", icon: BrainCircuit, body: <ReasoningPane d={d} />,
       badge: failed ? <Dot tone="bad" /> : undefined },
     ...(d.runs.length > 1 ? [{ key: "compare", label: "Compare tools", icon: Columns3, body: <ComparePane d={d} /> }] : []),
     { key: "plots", label: "Plots", icon: LineChart, body: <PerRun d={d} render={(r) => <PlotsPane run={r} />} /> },
-    { key: "data", label: "Data", icon: Table2, body: <PerRun d={d} render={(r) => <DataPane run={r} />} /> },
+    { key: "data", label: "Values", icon: Table2, body: <PerRun d={d} render={(r) => <DataPane run={r} />} /> },
     { key: "report", label: "Report", icon: FileText, body: <PerRun d={d} render={(r) => <ReportPane run={r} />} /> },
   ];
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-line bg-surface">
-        <div className="flex items-center gap-3 px-5 pb-2 pt-3">
-          <h1 className="text-[15px] font-semibold">{d.material} <span className="font-normal text-muted">· {d.dataset} · {d.runs.map((r) => r.label).join(" + ")}</span></h1>
-          {anyLive ? <Tag tone="run">running</Tag> : failed ? <Tag tone="bad">{failed} of {d.runs.length} failed</Tag>
-            : <Tag tone="ok">{d.runs.length === 1 ? "done" : `${d.runs.length} tools done`}</Tag>}
-          <button onClick={onClose} title="Close and go back to the start page" aria-label="Close"
-            className="ml-auto rounded p-1 text-muted hover:bg-subtle hover:text-ink"><X size={15} /></button>
+        <div className="flex items-start gap-3 px-5 pt-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[15px] font-semibold leading-6">{title}</h1>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
+              {anyLive ? <Status status="running" /> : failed ? <Tag tone="bad">{failed} of {d.runs.length} failed</Tag> : <Status status="done" />}
+              {run.data && <span>{clock(run.data.started_at)} · took {duration(run.data.started_at, run.data.finished_at)}</span>}
+              <span>{d.material} · {d.dataset}</span>
+              <span>{d.runs.length > 1 ? "Tools" : "Tool"}: {d.runs.map((r) => r.label).join(", ")}</span>
+              {detailed && <span className="font-mono">{d.runs.map((r) => r.id).join(", ")}</span>}
+            </div>
+            {first && d.prompt && d.prompt.trim() !== title && <p className="mt-1 line-clamp-1 text-[12.5px] text-ink-2" title={d.prompt}>Question: “{d.prompt}”</p>}
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => onAsk(failed ? "Why did this analysis fail?" : "Explain this result in plain words.")}>
+            <Bot size={13} /> Ask about this {failed && failed === d.runs.length ? "failure" : "result"}</Button>
+          <button onClick={onClose} title="Close and go back" aria-label="Close"
+            className="rounded p-1 text-muted hover:bg-subtle hover:text-ink"><X size={15} /></button>
         </div>
-        <div className="grid grid-cols-4 border-t border-line">
+        <div className="mx-5 mt-3 space-y-2">{d.runs.map((r) => <Verdict key={r.id} id={r.id} label={d.runs.length > 1 ? r.label : null} />)}</div>
+        <div className="mt-3 grid grid-cols-4 border-t border-line">
           <Cellv label="Measured scan" value={d.measured?.file ?? "—"} small />
-          <Cellv label="Wavelength" value={`${d.instrument?.wavelength_A ?? "—"} Å`} sub={`${d.instrument?.radiation ?? ""}${d.instrument?.ka2_present ? " · Kα1 + Kα2" : ""}`} mono />
+          <Cellv label="Wavelength" value={`${d.instrument?.wavelength_A ?? "—"} Å`} sub={`${[radiationLabel(d.instrument?.radiation), d.instrument?.radiation_source].filter(Boolean).join(", ")}${d.instrument?.ka2_present ? " · Kα1 + Kα2" : ""}`} mono />
           <Cellv label="Certified" value={cert.a_A != null ? `a ${f(cert.a_A)} Å` : "none on file"} sub={cert.c_A != null ? `c ${f(cert.c_A)} Å` : cert.a_uncertainty_A ? `± ${cert.a_uncertainty_A} Å (k = 2)` : undefined} mono />
           <div className="border-l border-line px-5 py-2.5">
             <div className="text-[11px] text-muted">Refined a</div>
@@ -269,7 +75,42 @@ function AnalysisWorkspace({ id, tab, onClose }: { id: string; tab?: string; onC
           </div>
         </div>
       </div>
-      <Sections key={id} initial={tab} sections={sections} />
+      <Sections key={id} initial={tab ?? (anyLive ? "reasoning" : undefined)} sections={sections} />
+    </div>
+  );
+}
+
+const BANNER: Record<Tone, string> = {
+  ok: "border-ok/25 bg-ok-soft", warn: "border-warn/25 bg-warn-soft", bad: "border-bad/25 bg-bad-soft",
+  run: "border-accent/25 bg-accent-soft", neutral: "border-line bg-subtle",
+};
+
+/** The plain-language answer of one tool's run, built from its own metrics; technical detail folds away. */
+function Verdict({ id, label }: { id: string; label: string | null }) {
+  const run = useQuery({ queryKey: ["run", id], queryFn: () => api.run(id) });
+  const [tech, setTech] = useState(false);
+  const feed = useLiveFeed(run.data && live(run.data.status) ? id : null);
+  if (!run.data) return null;
+  if (live(run.data.status)) {
+    return (
+      <div className={cn("rounded-lg border px-4 py-2.5", BANNER.run)}>
+        {label && <p className="mb-1 text-[11.5px] font-medium text-muted">{label}</p>}
+        <LiveStatus feed={feed} startedAt={run.data.started_at} />
+        <p className="mt-1 text-[12px] text-ink-2">The answer appears here when the analysis finishes. Follow each step live under Reasoning.</p>
+      </div>
+    );
+  }
+  const v = verdict(run.data);
+  return (
+    <div className={cn("rounded-lg border px-4 py-2.5", BANNER[v.tone])}>
+      <p className="text-[13.5px] font-semibold leading-6 text-ink">{label && <span className="mr-1.5 text-muted">{label}:</span>}{v.headline}</p>
+      {v.details.map((t) => <p key={t} className="mt-0.5 text-[12.5px] leading-5 text-ink-2">{t}</p>)}
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <ClaimBadge c={run.data.claim_check} />
+        {run.data.status === "failed" && run.data.error && <button onClick={() => setTech((x) => !x)} className="text-[11.5px] text-accent hover:underline">
+          {tech ? "Hide" : "Show"} technical details</button>}
+      </div>
+      {tech && <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-line bg-surface p-2 font-mono text-[11px] text-ink-2">{run.data.error}</pre>}
     </div>
   );
 }
@@ -307,6 +148,7 @@ function OverlayChart({ d, height = 340 }: { d: GroupView; height?: number }) {
 }
 
 function ResultsTable({ d }: { d: GroupView }) {
+  const detailed = useDetailed();
   const cert = d.certified ?? {};
   const hex = d.runs.some((r) => r.metrics.c_refined?.value != null);
   const v = (r: GroupRun, k: string) => r.metrics[k]?.value ?? null;
@@ -323,7 +165,7 @@ function ResultsTable({ d }: { d: GroupView }) {
         {d.runs.map((r) => (
           <tr key={r.id} className="border-b border-line align-top">
             <td className="py-1.5 font-sans"><span className="font-medium" style={{ color: ENGINE_COLOR[r.engine] }}>{r.label}</span>
-              <div className="text-[10.5px] text-muted">{r.id}</div></td>
+              {detailed && <div className="text-[10.5px] text-muted">{r.id}</div>}</td>
             <td>{f(v(r, "a_refined"))}{r.metrics.a_refined?.uncertainty ? <div className="text-[10.5px] text-muted">± {f(r.metrics.a_refined.uncertainty)}</div> : null}</td>
             {hex && <td>{f(v(r, "c_refined"))}</td>}
             <td className={cn(Math.abs(v(r, "difference_from_certified") ?? 0) > 0.0005 && "text-bad")}>{f(v(r, "difference_from_certified"))}</td>
@@ -333,7 +175,7 @@ function ResultsTable({ d }: { d: GroupView }) {
             <td>{v(r, "microstrain") != null ? f(v(r, "microstrain"), 5) : "—"}</td>
             <td className="font-sans">{r.story.classification ? <Tag tone={r.story.classification === "agreement" ? "ok" : "warn"}>
               {r.story.classification.replaceAll("_", " ")}</Tag> : <Status status={r.status} />}
-              {r.error && <div className="max-w-56 text-[10.5px] text-bad">{r.error.split("\n")[0]}</div>}</td>
+              {r.error && <div className="max-w-56 text-[10.5px] text-bad">{detailed ? r.error.split("\n")[0] : friendlyError(r.error).title}</div>}</td>
           </tr>))}
       </tbody>
     </table>
@@ -413,6 +255,7 @@ function ReasoningFlow({ r }: { r: GroupRun }) {
 }
 
 function ReasoningPane({ d }: { d: GroupView }) {
+  const detailed = useDetailed();
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -422,15 +265,36 @@ function ReasoningPane({ d }: { d: GroupView }) {
       </div>
       <div className={cn("grid gap-4", d.runs.length === 2 ? "lg:grid-cols-2" : d.runs.length >= 3 ? "xl:grid-cols-3" : "")}>
         {d.runs.map((r) => (
-          <section key={r.id} className="rounded-lg border border-line bg-surface">
+          <section key={r.id} className="min-w-0 rounded-lg border border-line bg-surface">
             <header className="flex items-center gap-2 border-b border-line px-4 py-2.5">
               <span className="h-2.5 w-2.5 rounded-full" style={{ background: ENGINE_COLOR[r.engine] }} />
-              <h2 className="text-[13px] font-semibold">{r.label}</h2><span className="font-mono text-[11px] text-muted">{r.id}</span>
+              <h2 className="text-[13px] font-semibold">{r.label}</h2>{detailed && <span className="font-mono text-[11px] text-muted">{r.id}</span>}
               <span className="ml-auto"><Status status={r.status} /></span>
             </header>
-            <div className="p-4"><ReasoningFlow r={r} /></div>
+            <RunReasoning r={r} />
           </section>))}
       </div>
+    </div>
+  );
+}
+
+/** While a run is going (and afterwards, as long as the server still holds its events) it is told live; otherwise
+ *  from its records. */
+function RunReasoning({ r }: { r: GroupRun }) {
+  const feed = useLiveFeed(r.id);
+  const [record, setRecord] = useState(false);
+  const running = live(r.status);
+  if (!running && (record || !feed.items.length)) {
+    return <div className="p-4">
+      {feed.items.length > 0 && <button onClick={() => setRecord(false)} className="mb-3 text-[11.5px] text-accent hover:underline">Show the timeline</button>}
+      <ReasoningFlow r={r} />
+    </div>;
+  }
+  return (
+    <div className="flex h-[min(72vh,680px)] flex-col">
+      <div className="min-h-0 flex-1"><LiveReasoning feed={feed} /></div>
+      {!running && <button onClick={() => setRecord(true)} className="border-t border-line px-4 py-2 text-left text-[11.5px] text-accent hover:underline">
+        Show the full record (every decision and the result)</button>}
     </div>
   );
 }

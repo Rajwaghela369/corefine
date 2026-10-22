@@ -212,6 +212,13 @@ def install_tool(name: str):
         raise HTTPException(400, detail=str(e)) from e
 
 
+@router.get("/tools/{name}/log")
+def tool_log(name: str):
+    if name not in tools.RECIPES:
+        raise HTTPException(404, detail=f"no tool {name!r}")
+    return {"name": name, "log": tools.log_tail(name)}
+
+
 # --- materials and the end-to-end workflow -------------------------------------------
 
 @router.get("/materials")

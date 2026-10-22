@@ -96,3 +96,63 @@ def test_installed_code_gets_an_implicit_local_target(tools_home, monkeypatch, t
     targets = execute.load_targets()
     assert targets["local"]["codes"]["espresso"]["executable"] == str(exe)
     assert "espresso" in next(t for t in execute.describe_targets() if t["name"] == "local")["codes"]
+
+
+def _dead_pid() -> int:
+    import subprocess
+    import sys
+
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    return p.pid
+
+
+def test_interrupted_installs_are_settled_from_disk(tools_home):
+    # qe finished on disk before its process died; abinit did not; sssp-pbe's process is still alive (this one)
+    exe = tools_home / "envs" / "qe" / "bin" / "pw.x"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("#!/bin/sh\n")
+    (tools_home / "envs" / "qe" / "conda-meta").mkdir()
+    (tools_home / "envs" / "qe" / "conda-meta" / "qe-7.6-x.json").write_text(json.dumps({"name": "qe", "version": "7.6"}))
+    dead = _dead_pid()
+    tools._set("qe", status="installing", pid=dead)
+    tools._set("abinit", status="installing", pid=None)
+    tools._set("sssp-pbe", status="installing", pid=__import__("os").getpid())
+    assert sorted(tools.recover_interrupted()) == ["abinit", "qe"]
+    st = tools._state()
+    assert st["qe"]["status"] == "installed" and st["qe"]["version"] == "7.6"
+    assert st["abinit"]["status"] == "failed" and "Retry" in st["abinit"]["message"]
+    assert st["sssp-pbe"]["status"] == "installing"
+
+
+def test_a_dead_install_does_not_block_a_retry(tools_home, monkeypatch):
+    started, dead = [], _dead_pid()
+
+    class FakePopen:
+        def __init__(self, cmd, **kw):
+            started.append(cmd)
+            self.pid = 4242
+
+    monkeypatch.setattr(tools.subprocess, "Popen", FakePopen)
+    tools._set("gpaw", status="installing", pid=dead)
+    st = tools.install("gpaw")
+    assert st["status"] == "installing" and st["pid"] == 4242
+    assert started[0][-3:] == ["-m", "app.dft.tools", "gpaw"]
+    monkeypatch.setattr(tools, "_alive", lambda pid: True)
+    with pytest.raises(tools.ToolError, match="already being installed"):
+        tools.install("gpaw")
+
+
+def test_maud_macos_bundle_layout(tools_home, monkeypatch):
+    from app.xrd import engines
+
+    monkeypatch.setattr(tools.platform, "system", lambda: "Darwin")
+    contents = tools_home / "apps" / "maud" / "Maud.app" / "Contents"
+    java = contents / "PlugIns" / "Home" / "bin" / "java"
+    java.parent.mkdir(parents=True)
+    java.write_text("")
+    (contents / "Java").mkdir()
+    (contents / "Java" / "Maud.jar").write_text("")
+    tools._set("maud", status="installed")
+    assert tools.managed_executable("maud") == java
+    assert engines._maud_paths() == (java, contents / "Java")

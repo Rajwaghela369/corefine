@@ -28,6 +28,14 @@ class SearchError(ValueError):
     pass
 
 
+def same_material(formula_a: str, formula_b: str) -> bool:
+    """True when two formulas reduce to the same composition (Si2 and Si, ZnO and Zn2O2)."""
+    try:
+        return optimade_formula(formula_a) == optimade_formula(formula_b)
+    except Exception:
+        return False
+
+
 def optimade_formula(formula: str) -> str:
     """OPTIMADE reduced formula: elements in alphabetical order, counts reduced, 1s omitted (GaAs -> AsGa)."""
     try:

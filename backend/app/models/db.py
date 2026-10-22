@@ -48,6 +48,7 @@ class RunRow(Base):
     parent_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), nullable=True)
     engine: Mapped[str | None] = mapped_column(String(16), nullable=True)
     group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    archived: Mapped[bool | None] = mapped_column(nullable=True)
 
 
 class StepRow(Base):
@@ -101,6 +102,8 @@ def get_engine():
     kwargs = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
+    else:  # Neon closes idle connections; retire pooled ones first so a query never lands on a closed socket
+        kwargs["pool_recycle"] = 240
     return create_engine(url, **kwargs)
 
 
@@ -110,7 +113,7 @@ def get_sessionmaker() -> sessionmaker:
 
 
 # Columns added after the first release; create_all does not add columns to an existing table
-ADDED_COLUMNS = {"runs": {"engine": "VARCHAR(16)", "group_id": "VARCHAR(64)"}}
+ADDED_COLUMNS = {"runs": {"engine": "VARCHAR(16)", "group_id": "VARCHAR(64)", "archived": "BOOLEAN"}}
 
 
 def init_db() -> None:

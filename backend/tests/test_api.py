@@ -1,3 +1,4 @@
+import functools
 import json
 
 import pytest
@@ -63,19 +64,44 @@ def test_run_api_and_sse(seeded, client, monkeypatch, gold_code):
     monkeypatch.setattr(llm, "parse", fake_parse)
     rid = client.post("/runs", json={"prompt": "Refine silicon", "dataset_ids": ["nist-srm-640f", "cod-9008565-si"],
                                      "session_id": "sess-1"}).json()["id"]
-    statuses = []
+    statuses, activities = [], []
     with client.stream("GET", f"/runs/{rid}/events") as r:
         for line in r.iter_lines():
             if line.startswith("data:"):
                 ev = json.loads(line[5:])
                 if ev["type"] == "step":
                     statuses.append(ev["step"]["status"])
+                if ev["type"] == "activity":
+                    activities.append(ev["agent"])
                 if ev["type"] == "run_finished":
                     break
     assert statuses[0] == "running" and statuses[-1] == "done"
+    assert activities == ["sandbox", "planner", "coder", "sandbox", "checker", "checker", "analyst", "claim_checker"]
     detail = client.get(f"/runs/{rid}").json()
     assert detail["status"] == "done" and detail["headline"]["a_refined"] == pytest.approx(5.430862, abs=1e-6)
     assert client.get(f"/runs/{rid}/artifacts/outputs/fit.png").headers["content-type"] == "image/png"
-    assert client.get("/runs").json()[0]["id"] == rid
+    listed = client.get("/runs").json()[0]
+    assert listed["id"] == rid and listed["title"] == detail["plan"]["title"] and listed["archived"] is False
+    assert client.patch(f"/runs/{rid}", json={"archived": True}).json()["archived"] is True
+    assert client.get("/runs").json()[0]["archived"] is True
+    assert client.patch("/runs/no-such-run", json={"archived": True}).status_code == 404
     msgs = client.get("/chat/sess-1").json()
     assert msgs and msgs[-1]["run_id"] == rid
+
+
+def test_chat_passes_open_run_to_agent(local_env, monkeypatch):
+    from langchain_core.messages import AIMessage
+
+    from app.agents import copilot
+
+    seen = {}
+
+    class FakeAgent:
+        def stream(self, inp, config, stream_mode):
+            seen["user"] = inp["messages"][-1].content
+            yield {"model": {"messages": [AIMessage("It agrees.")]}}
+
+    monkeypatch.setattr(copilot, "get_agent", functools.cache(FakeAgent))  # teardown calls cache_clear
+    events = list(copilot.chat("sess-ctx", "Explain this run", ["nist-srm-640f"], "run-2026-10-22-002"))
+    assert events[-1]["content"] == "It agrees."
+    assert "Run open on screen: run-2026-10-22-002" in seen["user"] and "nist-srm-640f" in seen["user"]

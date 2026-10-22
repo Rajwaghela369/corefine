@@ -4,6 +4,8 @@ The plan is fixed and written by code; the recorder, metrics, comparison with th
 are the same as for agent runs. The report is written by the Analyst when a key is configured, otherwise by code
 from the metrics alone, so every number in it is traceable either way.
 
+A LangGraph graph with one node per recorded step:
+
     prepare inputs ─▶ refine (engine stages) ─▶ compare with reference ─▶ report
 """
 
@@ -11,13 +13,17 @@ import json
 import logging
 import math
 import traceback
+from pathlib import Path
+from typing import Any, TypedDict
 
 import numpy as np
+from langgraph.graph import END, START, StateGraph
 
 from app.agents import checks
 from app.config import get_settings
 from app.models.contracts import Metric, Plan, PlanStep, RunRequest
 from app.models.db import utcnow
+from app.orchestration.live import Live
 from app.orchestration.recorder import Recorder
 from app.storage import datasets
 from app.storage.objects import get_store
@@ -146,13 +152,30 @@ def _code_report(engine: str, metrics: list[Metric], r: dict, pr: engines.Prepar
     return "\n".join(lines) + "\n"
 
 
-def execute_engine_run(run_id: str, req: RunRequest) -> None:
-    """Never raises: the run ends in a recorded state."""
-    s, store = get_settings(), get_store()
-    rec = Recorder(run_id, store)
-    engine = req.engine
-    try:
-        manifests = [datasets.load_manifest(i, store) for i in req.dataset_ids]
+class EngineState(TypedDict, total=False):
+    run_id: str
+    engine: str
+    manifests: list            # Manifest objects of the request
+    measured: Any              # the measured-pattern manifest
+    reference: str             # reference-structure dataset id
+    prepared: Any              # engines.Prepared
+    workdir: Path
+    result: dict               # the engine's refinement result
+    metrics: list[Metric]
+    comparison: list[Metric]
+    rule_class: str
+    reasons: list[str]
+
+
+def build_engine_graph(rec: Recorder, req: RunRequest):
+    """The fixed engine recipe as a LangGraph graph; each node is one recorded step of the run."""
+    s = get_settings()
+    live = Live(rec.run_id)
+
+    def prepare_node(state: EngineState) -> EngineState:
+        engine = state["engine"]
+        live.activity("orchestrator", "Reading the scan and the reference structure, and deciding the refinement settings")
+        manifests = [datasets.load_manifest(i, rec.store) for i in req.dataset_ids]
         measured = next(m for m in manifests if m.role == "measured_pattern")
         reference = engines.reference_for(measured.id, req.dataset_ids)
         ok, why = engines.available(engine)
@@ -167,14 +190,18 @@ def execute_engine_run(run_id: str, req: RunRequest) -> None:
         rec.run_update(status="running")
 
         rec.step_update(1, status="running", attempts=1)
-        workdir = s.LOCAL_DATA_DIR / "engine_runs" / run_id
+        workdir = s.LOCAL_DATA_DIR / "engine_runs" / state["run_id"]
         pr = engines.prepare(measured.id, reference, workdir)
         rec.put("outputs/scan.xye", pr.scan.read_bytes(), 1)
         for why in _input_reasoning(pr, measured, reference, engine):
             rec.log("reasoning", why)
         rec.step_update(1, status="done")
+        return {"manifests": manifests, "measured": measured, "reference": reference, "prepared": pr, "workdir": workdir}
 
+    def refine_node(state: EngineState) -> EngineState:
+        engine, pr, workdir = state["engine"], state["prepared"], state["workdir"]
         rec.step_update(2, status="running", attempts=1)
+        live.activity(engine, f"{engines.ENGINES[engine]['label']} is refining the pattern, stage by stage", step=2)
         r = engines.RUNNERS[engine](pr)
         prev = None
         for st in r["stages"]:
@@ -191,19 +218,22 @@ def execute_engine_run(run_id: str, req: RunRequest) -> None:
         for logname in ("gsas2.log", "maud.log"):
             if (workdir / logname).is_file():
                 rec.put(f"logs/{logname}", (workdir / logname).read_bytes(), 2)
-        metrics = _metrics(r, pr, measured)
+        metrics = _metrics(r, pr, state["measured"])
         mkey = rec.put("outputs/metrics.json", json.dumps([m.model_dump() for m in metrics], indent=2), 2)
         rec.ingest_metrics(mkey)
         rec.step_update(2, status="done")
+        return {"result": r, "metrics": metrics}
 
+    def compare_node(state: EngineState) -> EngineState:
+        measured, metrics = state["measured"], state["metrics"]
         rec.step_update(3, status="running", attempts=1)
         rec.run_update(status="analysing")
+        live.activity("checker", "Comparing the refined values with the certificate", step=3)
         comparison = checks.comparison_metrics(metrics, measured.reference_values or {}, s.SUCCESS_TARGET_A)
         if comparison:
             ckey = rec.put("outputs/comparison.json", json.dumps([m.model_dump() for m in comparison], indent=2), 3)
             rec.ingest_metrics(ckey)
-        all_metrics = metrics + comparison
-        rule_class, reasons = checks.rule_classification(all_metrics, None, pr.wavelength_A)
+        rule_class, reasons = checks.rule_classification(metrics + comparison, None, state["prepared"].wavelength_A)
         diff = next((m for m in comparison if m.name == "difference_from_certified"), None)
         if diff is not None:
             target = next((m.value for m in comparison if m.name == "success_target"), None)
@@ -213,16 +243,24 @@ def execute_engine_run(run_id: str, req: RunRequest) -> None:
             rec.log("reasoning", "No certified value for this dataset, so the result is reported without a comparison.")
         rec.log("rules", f"classification {rule_class}: " + "; ".join(reasons))
         rec.step_update(3, status="done")
+        return {"comparison": comparison, "rule_class": rule_class, "reasons": reasons}
 
-        allowed = checks.allowed_values(all_metrics, [m.model_dump(exclude_none=True) for m in manifests])
+    def report_node(state: EngineState) -> EngineState:
+        engine, r, pr = state["engine"], state["result"], state["prepared"]
+        all_metrics = state["metrics"] + state["comparison"]
+        rule_class = state["rule_class"]
+        allowed = checks.allowed_values(all_metrics, [m.model_dump(exclude_none=True) for m in state["manifests"]])
         classification, report = rule_class, None
         if s.ANTHROPIC_API_KEY:
             from app.agents import analyst
             from app.agents.llm import LLMError
 
             try:
-                out = analyst.write_report(req.prompt + f"\n\n(This run used {engines.ENGINES[engine]['label']}, not generated code.)",
-                                           all_metrics, None, None, manifests, rule_class, reasons)
+                live.activity("analyst", "Writing the report")
+                with live.draft("analyst") as on_text:
+                    out = analyst.write_report(req.prompt + f"\n\n(This run used {engines.ENGINES[engine]['label']}, not generated code.)",
+                                               all_metrics, None, None, state["manifests"], rule_class, state["reasons"],
+                                               on_text=on_text)
                 report, classification = out.report_markdown, out.classification
                 rec.log("analyst", f"classification {out.classification}")
             except LLMError as e:  # the refinement stands; only the prose falls back to code
@@ -231,10 +269,29 @@ def execute_engine_run(run_id: str, req: RunRequest) -> None:
             report = _code_report(engine, all_metrics, r, pr, rule_class)
             if not s.ANTHROPIC_API_KEY:
                 rec.log("orchestrator", "report written by code (no ANTHROPIC_API_KEY)")
+        live.activity("claim_checker", "Checking every number in the report against the run's files")
         claim = checks.claim_check(report, allowed + [st["Rwp_percent"] for st in r["stages"]])
         rec.log("claim_checker", f"{claim['checked']} numbers checked, {len(claim['untraced'])} untraced")
         rec.put("report.md", report)
         rec.finish("done", classification=classification, claim_check=claim)
+        return {}
+
+    g = StateGraph(EngineState)
+    for name, fn in [("prepare", prepare_node), ("refine", refine_node), ("compare", compare_node), ("report", report_node)]:
+        g.add_node(name, fn)
+    g.add_edge(START, "prepare")
+    g.add_edge("prepare", "refine")
+    g.add_edge("refine", "compare")
+    g.add_edge("compare", "report")
+    g.add_edge("report", END)
+    return g.compile()
+
+
+def execute_engine_run(run_id: str, req: RunRequest) -> None:
+    """Never raises: the run ends in a recorded state."""
+    rec = Recorder(run_id, get_store())
+    try:
+        build_engine_graph(rec, req).invoke({"run_id": run_id, "engine": req.engine})
     except Exception as e:  # noqa: BLE001 — recorded for the UI
         log.exception("engine run %s failed", run_id)
         msg = str(e) if isinstance(e, (engines.EngineError, datasets.ManifestError)) else \
@@ -254,8 +311,8 @@ def group_view(group_id: str) -> dict:
     from pymatgen.core import Lattice, Structure
     from sqlalchemy import select
 
-    from app.api.bridge import run_story
     from app.models.db import MetricRow, RunRow, get_sessionmaker
+    from app.orchestration.story import run_story
     from app.xrd import patterns
 
     store = get_store()
@@ -301,7 +358,7 @@ def group_view(group_id: str) -> dict:
     mm = datasets.load_manifest(measured_id)
     inst = mm.instrument.model_dump(exclude_none=True) if mm.instrument else {}
     out["material"], out["reference"] = mm.material, ref_id
-    out["instrument"] = {k: inst.get(k) for k in ("radiation", "wavelength_A", "wavelength_source", "ka2_present")}
+    out["instrument"] = {k: inst.get(k) for k in ("radiation", "radiation_source", "wavelength_A", "wavelength_source", "ka2_present")}
     out["prompt"] = runs[0].prompt
     cert = mm.reference_values or {}
     out["certified"] = {k: cert.get(k) for k in ("a_A", "a_uncertainty_A", "c_A", "c_uncertainty_A", "source") if cert.get(k)}

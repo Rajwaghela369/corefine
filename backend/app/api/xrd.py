@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.dft import materials, sources
-from app.storage import datasets
+from app.storage import datasets, imports
 from app.storage.imports import import_materials_project
 from app.xrd import analysis, patterns
 
@@ -50,6 +50,20 @@ def import_mp(body: ImportBody):
     """Materials Project structure -> Storage reference_structure dataset."""
     try:
         m = import_materials_project(body.mp_id.removeprefix("mp:"))
+    except (sources.SourceError, ValueError) as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return {"dataset": m.id, "manifest": m.model_dump(exclude_none=True)}
+
+
+class ImportCodBody(BaseModel):
+    cod_id: str
+
+
+@router.post("/import/cod")
+def import_cod(body: ImportCodBody):
+    """Crystallography Open Database entry -> Storage reference_structure dataset (the CIF as published)."""
+    try:
+        m = imports.import_cod(body.cod_id)
     except (sources.SourceError, ValueError) as e:
         raise HTTPException(400, detail=str(e)) from e
     return {"dataset": m.id, "manifest": m.model_dump(exclude_none=True)}

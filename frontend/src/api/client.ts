@@ -4,7 +4,11 @@ export const API = "/api";
 
 export type Role = "measured_pattern" | "reference_structure" | "reference_value";
 export interface DatasetNode { id: string; role: Role | null; valid: boolean; problem: string | null; files: string[];
-  material?: string | null }
+  material?: string | null; technique?: string | null;
+  instrument?: { radiation?: string; radiation_source?: string; wavelength_A?: number } | null }
+/** What an uploaded CIF states about itself; each value with the tag it came from. */
+export interface FileFacts { format: "pdcif" | "cif" | null; role: Role | null;
+  found: Partial<Record<"radiation" | "radiation_source" | "probe" | "wavelength_A" | "material", { value: string | number; tag: string }>> }
 export type StepStatus = "pending" | "running" | "retrying" | "done" | "failed";
 export interface Step { idx: number; name: string; status: StepStatus; attempts: number; error: string | null;
   code_key: string | null; stdout_key: string | null }
@@ -22,14 +26,15 @@ export interface GroupRun { id: string; engine: Engine; label: string; status: s
   curve?: { x: number[]; observed: number[]; calculated: number[]; background: number[] };
   reflections?: { two_theta: number; intensity: number; hkl: string }[]; story: ExperimentStory }
 export interface GroupView { group_id: string; dataset: string; runs: GroupRun[]; material?: string; reference?: string; prompt?: string;
-  instrument?: { radiation?: string; wavelength_A?: number; wavelength_source?: string; ka2_present?: boolean | null };
+  instrument?: { radiation?: string; radiation_source?: string; wavelength_A?: number; wavelength_source?: string; ka2_present?: boolean | null };
   measured?: { file: string; x: number[]; y: number[]; wavelength_A: number };
   certified?: { a_A?: number; a_uncertainty_A?: number; c_A?: number; c_uncertainty_A?: number; source?: string } }
-export interface RunListItem { id: string; prompt: string; status: string; dataset_ids: string[];
+export interface RunListItem { id: string; prompt: string; title?: string | null; status: string; dataset_ids: string[];
+  error?: string | null; archived?: boolean;
   engine?: Engine; group_id?: string | null;
   parent_run_id: string | null; classification: string | null; claim_passed: boolean | null;
   started_at: string | null; finished_at: string | null; headline: Headline | null }
-export interface RunDetail extends Omit<RunListItem, "claim_passed"> {
+export interface RunDetail extends Omit<RunListItem, "claim_passed" | "title" | "archived"> {
   plan: { title: string; summary: string; steps: PlanStep[] } | null; error: string | null;
   claim_check: ClaimCheck | null; steps: Step[]; metrics: Metric[];
   artifacts: { step_idx: number | null; kind: string; path: string; sha256: string }[] }
@@ -76,11 +81,19 @@ export const api = {
     return fetch(`${API}/datasets/scan/import`, { method: "POST", body: fd }).then(json<{ id: string; notes: string[] }>);
   },
   rescan: () => fetch(`${API}/datasets/rescan`, { method: "POST" }).then(json),
+  inspectFile: (f: File) => {
+    const fd = new FormData();
+    fd.append("file", f);
+    return fetch(`${API}/datasets/inspect`, { method: "POST", body: fd }).then(json<FileFacts>);
+  },
   runs: () => fetch(`${API}/runs`).then(json<RunListItem[]>),
   run: (id: string) => fetch(`${API}/runs/${id}`).then(json<RunDetail>),
   startRun: (body: ProposedRun & { session_id: string }) =>
     fetch(`${API}/runs`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body) }).then(json<{ id: string; ids: string[]; group_id: string | null }>),
+  archiveRun: (id: string, archived: boolean) =>
+    fetch(`${API}/runs/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }) }).then(json<{ id: string; archived: boolean }>),
   engines: () => fetch(`${API}/runs/engines`).then(json<EngineInfo[]>),
   group: (id: string) => fetch(`${API}/runs/group/${id}`).then(json<GroupView>),
   artifactText: (runId: string, path: string) => fetch(`${API}/runs/${runId}/artifacts/${path}`).then((r) => r.text()),
@@ -95,9 +108,10 @@ export interface Health { mode: string; all_ok: boolean; services: Record<string
 export interface SseEvent { event: string; data: any }
 
 /** POST /chat returns an SSE stream; EventSource only does GET, so parse the stream by hand. */
-export async function* chatStream(session_id: string, message: string, dataset_ids: string[]): AsyncGenerator<SseEvent> {
+export async function* chatStream(session_id: string, message: string, dataset_ids: string[],
+  run_id: string | null = null): AsyncGenerator<SseEvent> {
   const r = await fetch(`${API}/chat`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id, message, dataset_ids }) });
+    body: JSON.stringify({ session_id, message, dataset_ids, run_id }) });
   if (!r.ok || !r.body) throw new Error(`chat failed: ${r.status}`);
   const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
@@ -159,22 +173,6 @@ export interface ExperimentStory { run: string; engine: Engine; status: string; 
   log: { time: string; agent: string; note: string }[]; classification: string | null;
   claim: { passed: boolean; checked: number } | null; result: Record<string, StoryMetric>;
   stages?: { stage: string; Rwp_percent: number; wizard?: number }[]; settings?: Record<string, unknown>; warnings?: string[] }
-export interface TheoryStory { set: string; created: string; goal: string | null;
-  request: { structure: string; functional: string; kmesh: number[]; codes: string[] };
-  cell: { formula: string; spacegroup: string; natoms: number }; lattice: { a_A?: number; c_A?: number };
-  decisions: { field: string; value: string; reason: string; source: string }[]; warnings: string[]; planner: string | null;
-  checks: { passed: boolean; n_passed: number; n_not_run: number; failed: { check: string; detail: string }[] };
-  codes: Record<string, string>;
-  runs: Record<string, { label: string; status: string; converged: boolean | null; iterations: number | null; gap_eV: number | null;
-    healed: { error: string; change: string; why: string } | null; message: string; attempts: number }>;
-  reference: { source: string; band_gap_eV: number | null; is_metal: boolean | null } | null }
-export interface Story { material: string; experiment: ExperimentStory[]; theory: TheoryStory[] }
-export interface Bridge { material: string; experiment_reference: string | null; notes: string[];
-  experiment: { run: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; classification: string | null }[];
-  certified: { dataset: string; a_A: number; uncertainty_A: number | null; temperature_C: number | null; source: string | null }[];
-  theory: { set: string; code: string; functional: string; a0_A: number; B0_GPa: number | null; kmesh: number[] | null;
-    vs_experiment_percent: number | null; pressure_equivalent_GPa?: number; reference?: string }[];
-  raman: { set: string; code: string; functional: string; frequency_cm1: number; label: string | null; raman_active: boolean; ir_active: boolean }[] }
 export interface StudyPoint { ok: boolean; e_per_atom_eV?: number; volume_per_atom_A3?: number; error?: string; scf_iterations?: number }
 export interface ConvRow { setting: string; ok: boolean; e_per_atom_eV: number | null; delta_to_most_accurate_meV: number | null;
   change_from_previous_meV: number | null; within: boolean; scf_iterations: number | null; error: string | null; healed: string | null;
@@ -201,7 +199,7 @@ export interface DftRun { code: string; target: string; kind: string; status: st
   message: string; attempts?: number; remote_job_id?: string | null; remote_dir?: string; results: DftResults | null; updated: string }
 export interface DftTarget { name: string; kind: "local" | "slurm"; host: string | null; codes: string[]; confirm: boolean }
 export interface DftTool { name: string; label: string; license: string; size: string; source: string; installable: boolean;
-  status: string; message: string; version: string | null }
+  status: string; message: string; version: string | null; finished?: string | null }
 export interface DftTools { tools: DftTool[]; not_installable: Record<string, string>; code_tools: Record<string, string[]>;
   functional_tools: Record<string, Record<string, string[]>>; local: Record<string, string> }
 export interface MpMaterial { id: string; formula: string; nsites: number; spacegroup: string | null; e_above_hull_eV: number | null;
@@ -228,8 +226,6 @@ export const dft = {
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, kmesh: kmesh ?? null }) }).then(json),
   planPreview: (material: string, functional: string) =>
     fetch(`${API}/dft/plan-preview?material=${encodeURIComponent(material)}&functional=${functional}`).then(json<{ plan: DftPlan; material: MpMaterial }>),
-  story: (material: string) => fetch(`${API}/bridge/story?material=${encodeURIComponent(material)}`).then(json<Story>),
-  bridge: (material: string) => fetch(`${API}/bridge?material=${encodeURIComponent(material)}`).then(json<Bridge>),
   saveEos: (id: string, code: string) => fetch(`${API}/dft/jobs/${id}/studies/eos/${code}/save`, { method: "POST" })
     .then(json<{ dataset: string }>),
   searchMaterials: (q: string) => fetch(`${API}/dft/materials?q=${encodeURIComponent(q)}`).then(json<MpMaterial[]>),
@@ -237,6 +233,7 @@ export const dft = {
     fetch(`${API}/dft/workflow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(json<{ id: string; plan: DftPlan; runs: string[]; checks_passed: boolean }>),
   installTool: (name: string) => fetch(`${API}/dft/tools/${name}/install`, { method: "POST" }).then(json),
+  toolLog: (name: string) => fetch(`${API}/dft/tools/${name}/log`).then(json<{ name: string; log: string }>),
   startRun: (id: string, code: string, target: string) => fetch(`${API}/dft/jobs/${id}/runs`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, target }) }).then(json<DftRun>),
   importResults: (id: string, code: string, files: File[]) => {
@@ -277,6 +274,8 @@ export const xrd = {
       .then(json<XrdSimulated>),
   importMp: (mp_id: string) => fetch(`${API}/xrd/import/materials-project`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mp_id }) }).then(json<{ dataset: string }>),
+  importCod: (cod_id: string) => fetch(`${API}/xrd/import/cod`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cod_id }) }).then(json<{ dataset: string }>),
 };
 
 export type ScanPreview = {

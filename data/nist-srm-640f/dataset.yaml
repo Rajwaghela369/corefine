@@ -6,6 +6,7 @@ format: pdcif
 files: [raw/*.cif]
 instrument:
   radiation: CuKa1            # file: _diffrn_radiation_type 'Cu K\a' + Ge 111 Johansson IBM (Kα2 removed)
+  probe: x-ray                # file: _diffrn_radiation_probe x-ray
   wavelength_A: 1.5405929     # NOT in the CIFs; from NIST SRM 640f certificate, Table 1 (λ = 0.15405929 nm)
   wavelength_source: "NIST SRM 640f certificate (26 Feb 2019), Table 1"
   goniometer_radius_mm: 217.5 # file: _pd_instr_dist_spec/detc
