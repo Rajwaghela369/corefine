@@ -330,9 +330,11 @@ def group_view(group_id: str) -> dict:
     x, y, wl, file, _ = patterns.measured_full(measured_id)
     step = max(1, len(x) // 4000)
     out["measured"] = {"file": file, "x": x[::step].tolist(), "y": y[::step].tolist(), "wavelength_A": wl}
-    ref_id = engines.reference_for(measured_id, runs[0].dataset_ids)
-    ref = datasets.load_manifest(ref_id)
-    base = Structure.from_str(store.get(datasets.dataset_files(ref)[0]).decode(), fmt="cif")
+    try:  # a scan without a reference structure (an uploaded one, say) can still be shown; only the engines need it
+        ref_id = engines.reference_for(measured_id, runs[0].dataset_ids)
+        base = Structure.from_str(store.get(datasets.dataset_files(datasets.load_manifest(ref_id))[0]).decode(), fmt="cif")
+    except engines.EngineError:
+        ref_id, base = None, None
     for r in runs:
         m = metrics[r.id]
         entry = {"id": r.id, "engine": r.engine or "agents", "label": engines.ENGINES[r.engine or "agents"]["label"],
@@ -343,7 +345,7 @@ def group_view(group_id: str) -> dict:
             n = max(1, len(c["x"]) // 4000)
             entry["curve"] = {k: v[::n] for k, v in c.items()}
         a = (m.get("a_refined") or {}).get("value")
-        if a:
+        if a and base is not None:
             cc = (m.get("c_refined") or {}).get("value")
             lat = base.lattice
             ratio_c = (cc / lat.c) if cc else a / lat.a

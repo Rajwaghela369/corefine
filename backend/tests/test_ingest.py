@@ -88,3 +88,11 @@ def test_identify_needs_to_know_the_sample(client):
     client.post("/datasets/scan/import", files=files)
     r = client.post("/xrd/identify", json={"dataset": "xx"})
     assert r.status_code == 400 and "what the sample is" in r.json()["detail"]
+
+
+def test_engines_refused_up_front_without_a_reference_and_group_view_survives(client):
+    client.post("/datasets/scan/import", files={"file": ("nr.xy", _scan(), "text/plain")})
+    r = client.post("/runs", json={"prompt": "refine", "dataset_ids": ["nr"], "engines": ["gsas2"]})
+    assert r.status_code == 400 and "reference structure" in r.json()["detail"]
+    from app.orchestration.engine_run import group_view
+    assert group_view("does-not-exist")["runs"] == []

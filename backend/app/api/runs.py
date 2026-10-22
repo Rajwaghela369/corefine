@@ -56,6 +56,15 @@ def start_runs(req: RunRequest) -> dict:
     """One run per selected engine. With more than one, they share a group_id so they can be compared."""
     from app.xrd import engines
 
+    if any(e != "agents" for e in req.engines):  # GSAS-II and MAUD refine a crystal model; fail now, not after queueing
+        from app.storage import datasets
+
+        measured = next((i for i in req.dataset_ids if datasets.load_manifest(i).role == "measured_pattern"), None)
+        if measured:
+            try:
+                engines.reference_for(measured, req.dataset_ids)
+            except engines.EngineError as e:
+                raise HTTPException(400, detail=str(e)) from e
     for e in req.engines:
         ok, why = engines.available(e)
         if not ok:

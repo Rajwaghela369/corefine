@@ -42,7 +42,10 @@ export function NewAnalysis({ session, datasets, onToggleDataset, onStarted }: {
   const needsText = engines.includes("agents");
   const missing = !hasMeasured ? "Choose a measured scan in step 1."
     : !engines.length ? "Choose at least one method in step 3."
-    : needsText && !text.trim() ? "Describe what you want to find out in step 2." : null;
+    : needsText && !text.trim() ? "Describe what you want to find out in step 2."
+    : engines.some((e) => e !== "agents") && !reference && !autoRef
+      ? "GSAS-II and MAUD refine a crystal model, and there is none for this scan yet. Pick a reference structure in step 1, or use the agents method."
+    : null;
   const engineName = (e: string) => engineList.data?.find((x) => x.name === e)?.label ?? e;
   const prompt = text.trim() || `Refine the lattice parameters with ${engines.map(engineName).join(" and ")}`;
 
