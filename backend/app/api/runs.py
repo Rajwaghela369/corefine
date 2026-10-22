@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.models.contracts import RunRequest
 from app.models.db import ArtifactRow, MetricRow, RunRow, StepRow, get_sessionmaker
@@ -46,9 +46,15 @@ def fail_interrupted_runs() -> list[str]:
 
 
 def _new_run_id() -> str:
+    """Next free id of the day. Run files in storage count too: a new or reset database must never reuse an id
+    whose folder already exists, or the new run would overwrite the old one's files."""
+    from app.storage.objects import get_store
+
     day = datetime.now(UTC).strftime("%Y-%m-%d")
     with _id_lock, get_sessionmaker()() as db:
-        n = db.scalar(select(func.count()).select_from(RunRow).where(RunRow.id.like(f"run-{day}-%"))) or 0
+        taken = set(db.scalars(select(RunRow.id).where(RunRow.id.like(f"run-{day}-%"))))
+        taken |= {k.split("/")[1] for k in get_store().list(f"runs/run-{day}-")}
+        n = max((int(i.rsplit("-", 1)[1]) for i in taken if i.rsplit("-", 1)[1].isdigit()), default=0)
         return f"run-{day}-{n + 1:03d}"
 
 

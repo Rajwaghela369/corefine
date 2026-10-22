@@ -73,7 +73,11 @@ def _save(d: Path, **update) -> dict:
         st = json.loads(p.read_text()) if p.is_file() else {}
         st.update(update)
         p.write_text(json.dumps(st, indent=2, default=str))
-        return st
+    if st.get("status") in ("done", "failed"):
+        from app.dft import sets
+
+        sets.settle_soon(d)
+    return st
 
 
 def run(set_dir: Path, code: str, kmesh: tuple[int, int, int] | None = None) -> dict:

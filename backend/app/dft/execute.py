@@ -113,7 +113,11 @@ def write_state(set_dir: Path, code: str, **update) -> dict:
         st = read_state(set_dir, code) or {}
         st.update(update, code=code, updated=now())
         state_path(set_dir, code).write_text(json.dumps(st, indent=2, default=str))
-        return st
+    if st.get("status") in TERMINAL:  # a finished run: its outputs go to the cloud record
+        from app.dft import sets
+
+        sets.settle_soon(set_dir)
+    return st
 
 
 def all_states(set_dir: Path) -> dict[str, dict]:

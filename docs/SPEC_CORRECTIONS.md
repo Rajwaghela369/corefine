@@ -98,3 +98,11 @@ certification does. This is a hypothesis, not tested.
 - **One way to add data** (2026-10-22): *Add dataset* offers upload, Materials Project and COD (the COD CIF stored as
   published, with its SHA-256). An uploaded CIF pre-fills the form from its own tags only (`/datasets/inspect`);
   nothing is looked up, and refined values in a measured CIF are never read there.
+- **Simulation sets live in the cloud services** (2026-10-22). A set's files go to object storage under `dft/<id>/`
+  and one Neon row (`dft_sets`) holds what the list and the set's page show (`app/dft/sets.py`). The codes still run
+  on this computer in a working folder under `.local/dft/`; when a run, study or workflow ends and nothing else is
+  queued, the folder is uploaded (only changed files) and removed, and new work downloads it again. Restart scratch
+  (QE `tmp/`, ABINIT `_WFK/_DEN/_POT`, GPAW `.gpw`, exciting `STATE/EVEC*.OUT`, Questaal `rst/mixm`) is never
+  uploaded. On startup, local runs and studies left "running" by a restart are marked failed (Slurm jobs are not).
+- **Run ids skip ids that have files in storage**, so a new or reset database never reuses an id whose S3 folder
+  exists (the Neon branch used during development expired; the main branch started empty on 2026-10-22).

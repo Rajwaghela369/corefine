@@ -87,7 +87,10 @@ def _run_codes_node(state: WorkflowState) -> WorkflowState:
 
 
 def _summary_node(state: WorkflowState) -> WorkflowState:
+    from app.dft import sets
+
     write_summary(Path(state["set_dir"]))
+    sets.settle_soon(Path(state["set_dir"]))  # the workflow is over: upload, and remove the working copy if idle
     return {}
 
 
