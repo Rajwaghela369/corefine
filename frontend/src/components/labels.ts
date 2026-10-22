@@ -83,8 +83,13 @@ export const formatUncertainty = (u: number | null | undefined) =>
 
 // --- runs ------------------------------------------------------------------
 
-const metric = (run: RunDetail, name: string) => run.metrics.find((m) => m.name === name);
 const asNum = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" && !isNaN(Number(v)) ? Number(v) : null);
+// The code-run comparison is recorded after the agents' own metrics, and the Coder may log a placeholder under the same
+// name ("a_certified: not provided in manifest", since it never sees the certificate): the last numeric entry wins.
+const metric = (run: RunDetail, name: string) => {
+  const all = run.metrics.filter((m) => m.name === name);
+  return all.findLast((m) => asNum(m.value) != null) ?? all.at(-1);
+};
 
 export function runTitle(r: Pick<RunListItem, "title" | "prompt">): string {
   return r.title?.trim() || r.prompt.trim() || "Untitled analysis";
