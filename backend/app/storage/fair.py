@@ -35,7 +35,8 @@ def check(m: Manifest, store: ObjectStore | None = None) -> list[dict]:
     out.append(_check("README present", readme, "README.md" if readme else "no README.md in the dataset folder"))
     if m.role == "measured_pattern":
         inst = m.instrument.model_dump(exclude_none=True) if m.instrument else {}
-        out.append(_check("radiation stated", bool(inst.get("radiation")), str(inst.get("radiation"))))
+        rad = " · ".join(str(inst[k]) for k in ("radiation", "radiation_source") if inst.get(k))
+        out.append(_check("radiation type or source stated", bool(rad), rad or "neither radiation nor radiation_source"))
         out.append(_check("wavelength stated", inst.get("wavelength_A") is not None, f"{inst.get('wavelength_A')} Å"))
         out.append(_check("wavelength source stated", bool(inst.get("wavelength_source")), str(inst.get("wavelength_source"))))
         temp = m.temperature_C is not None or bool(extra.get("temperature_note"))

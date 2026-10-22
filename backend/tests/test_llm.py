@@ -56,7 +56,8 @@ def test_parse_returns_the_typed_output_and_names_the_run(monkeypatch):
 
 
 @pytest.mark.parametrize("result, message", [
-    ({"raw": raw("refusal", stop_details={"category": "cyber"}), "parsed": None, "parsing_error": None}, "declined the request (category: cyber)"),
+    ({"raw": raw("refusal", stop_details={"category": "cyber"}), "parsed": None, "parsing_error": None},
+     "declined the request (category: cyber)"),
     ({"raw": raw("max_tokens"), "parsed": None, "parsing_error": None}, "hit max_tokens=16000"),
     ({"raw": raw(), "parsed": None, "parsing_error": ValueError("bad json")}, "no structured output returned (bad json)"),
 ])

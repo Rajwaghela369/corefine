@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Download, ExternalLink, Upload, X, XCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, dft, type DftJob, type MpMaterial } from "../api/client";
 import { Button, Empty, Field, PanelHeader, Status, Tag, clock, cn, inputCls, num } from "../components/ui";
 import { RunsPane, livePollInterval, runIsLive } from "./DftRuns";
@@ -8,6 +8,7 @@ import { ConvergencePane } from "./DftStudies";
 import { Dot, Sections } from "../components/Sections";
 import { Atom, FileCode, LayoutDashboard, Play, Search, ShieldCheck, Sigma, TrendingDown } from "lucide-react";
 import { Welcome, WelcomeSection } from "../components/Welcome";
+import { useGo } from "../components/nav";
 
 type SourceKind = "find" | "storage" | "mp" | "cod" | "upload";
 const SOURCE_TABS: { id: SourceKind; label: string }[] = [
@@ -262,76 +263,16 @@ function MaterialSearch({ picked, onPick }: { picked: MpMaterial | null; onPick:
   );
 }
 
-/** Codes that are not usable here: install the open-source ones with one click; explain the others. */
+/** Codes that are not usable here: one line pointing to the Software page, where everything is installed. */
 function CodeInstaller() {
-  const qc = useQueryClient();
+  const go = useGo();
   const cfg = useQuery({ queryKey: ["dft-config"], queryFn: dft.config });
-  const tools = useQuery({ queryKey: ["dft-tools"], queryFn: dft.tools,
-    refetchInterval: (q) => (q.state.data?.tools.some((t) => t.status === "installing") ? 2000 : false) });
-  const install = useMutation({
-    mutationFn: async (names: string[]) => { for (const n of names) await dft.installTool(n); },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["dft-tools"] }),
-  });
-  const t = tools.data;
-  const byName = Object.fromEntries((t?.tools ?? []).map((x) => [x.name, x]));
-  const wasInstalling = useRef(false);
-  const installing = (t?.tools ?? []).some((x) => x.status === "installing");
-  useEffect(() => {  // when an install finishes, refresh which codes are usable
-    if (wasInstalling.current && !installing) { qc.invalidateQueries({ queryKey: ["dft-config"] }); qc.invalidateQueries({ queryKey: ["dft-targets"] }); }
-    wasInstalling.current = installing;
-  }, [installing, qc]);
   const missing = (cfg.data?.codes ?? []).filter((c) => !c.available);
-  // usable codes that still lack the library for another functional (e.g. LDA pseudopotentials for QE)
-  const libs = (cfg.data?.codes ?? []).filter((c) => c.available).flatMap((c) =>
-    Object.entries(t?.functional_tools[c.name] ?? {}).map(([xc, names]) => ({ code: c, xc, parts: names.map((n) => byName[n]).filter(Boolean) })))
-    .filter((l) => l.parts.length && l.parts.some((x) => x.status !== "installed"));
-  if (!t || (!missing.length && !libs.length)) return null;
-  const busyAny = (t.tools ?? []).some((x) => x.status === "installing");
+  if (!missing.length) return null;
   return (
-    <details open={busyAny} className="mt-2 rounded-md border border-line bg-subtle/60">
-      <summary className="cursor-pointer px-2.5 py-1.5 text-[11.5px] text-ink-2">
-        {missing.length ? `${missing.length} more program${missing.length > 1 ? "s" : ""} need setup` : "Optional add-ons"}
-        {libs.length > 0 && missing.length > 0 && ` · ${libs.length} optional add-on${libs.length > 1 ? "s" : ""}`}</summary>
-    <div className="space-y-1.5 border-t border-line p-2">
-      {missing.map((c) => {
-        const names = t.code_tools[c.name];
-        const parts = (names ?? []).map((n) => byName[n]).filter(Boolean);
-        const busy = parts.some((x) => x.status === "installing");
-        const failed = parts.find((x) => x.status === "failed");
-        return (
-          <div key={c.name} className="text-[11px] leading-4">
-            <div className="flex items-center justify-between gap-2">
-              <span><span className="font-medium text-ink-2">{c.label}</span> <span className="text-muted">not available here</span></span>
-              {names && <Button size="sm" variant="secondary" disabled={busy || install.isPending}
-                onClick={() => install.mutate(names.filter((n) => byName[n]?.status !== "installed"))}>
-                {busy ? "Installing…" : "Install"}</Button>}
-            </div>
-            {names ? <div className="text-muted">{parts.map((x) => `${x.label} (${x.license}, ${x.size})`).join(" + ")}</div>
-              : <div className="text-muted">{t.not_installable[c.name] ?? c.reason}</div>}
-            {busy && <div className="text-accent">{parts.find((x) => x.status === "installing")?.message}</div>}
-            {failed && <div className="text-bad">Install failed: {failed.message}</div>}
-          </div>
-        );
-      })}
-      {libs.map(({ code, xc, parts }) => {
-        const busy = parts.some((x) => x.status === "installing");
-        const failed = parts.find((x) => x.status === "failed");
-        return (
-          <div key={`${code.name}-${xc}`} className="text-[11px] leading-4">
-            <div className="flex items-center justify-between gap-2">
-              <span><span className="font-medium text-ink-2">{code.label}</span> <span className="text-muted">{xc} needs its own pseudopotentials</span></span>
-              <Button size="sm" variant="secondary" disabled={busy || install.isPending}
-                onClick={() => install.mutate(parts.filter((x) => x.status !== "installed").map((x) => x.name))}>
-                {busy ? "Installing…" : "Install"}</Button>
-            </div>
-            <div className="text-muted">{parts.map((x) => `${x.label} (${x.license}, ${x.size})`).join(" + ")}</div>
-            {busy && <div className="text-accent">{parts.find((x) => x.status === "installing")?.message}</div>}
-            {failed && <div className="text-bad">Install failed: {failed.message}</div>}
-          </div>
-        );
-      })}
-    </div>
-    </details>
+    <p className="mt-2 text-[11.5px] leading-4 text-muted">
+      {missing.length} more program{missing.length > 1 ? "s" : ""} ({missing.map((c) => c.label).join(", ")}) not set up on this computer.{" "}
+      <button className="text-accent hover:underline" onClick={() => go("software")}>Set up in Software →</button></p>
   );
 }
 

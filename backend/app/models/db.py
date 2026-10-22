@@ -102,6 +102,8 @@ def get_engine():
     kwargs = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
+    else:  # Neon closes idle connections; retire pooled ones first so a query never lands on a closed socket
+        kwargs["pool_recycle"] = 240
     return create_engine(url, **kwargs)
 
 

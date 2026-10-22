@@ -84,3 +84,17 @@ certification does. This is a hypothesis, not tested.
   streaming and server-side fallbacks as before). GSAS-II/MAUD runs and the DFT workflow became LangGraph graphs like
   the agent run graph; the DFT workflow pauses before its runs (checkpointer) and resumes them in the background.
   The raw Anthropic SDK is used only for the token-free health check and its exception types.
+- **Programs run on the user's computer; the backend uses the cloud services** (2026-10-22). Installs go to
+  `TOOLS_DIR` and run as detached processes (`python -m app.dft.tools <name>`, PID in `tools.json`), so a backend
+  restart no longer kills them; installs whose process is gone are settled from disk at startup and on every status
+  read (complete → installed, else failed with Retry). One *Software* page installs everything; Analyse and Simulate
+  link to it. macOS: MAUD installs from its official `.dmg.gz` (SHA-256 from the GitHub release record, Java and
+  `Maud.jar` inside `Maud.app`); conda-forge has no ABINIT for Apple Silicon, so the Intel build is installed and
+  runs under Rosetta 2.
+- **Instrument fields follow coreCIF** (2026-10-22): `instrument.radiation` is `_diffrn_radiation_type` (emission line,
+  e.g. Cu Kα1); the new `radiation_source` is `_diffrn_source` (sealed tube, synchrotron, reactor …) and `probe` is
+  `_diffrn_radiation_probe`. A legacy `radiation: synchrotron` is read as `radiation_source: synchrotron`; engines
+  decide lab vs synchrotron from `radiation_source`.
+- **One way to add data** (2026-10-22): *Add dataset* offers upload, Materials Project and COD (the COD CIF stored as
+  published, with its SHA-256). An uploaded CIF pre-fills the form from its own tags only (`/datasets/inspect`);
+  nothing is looked up, and refined values in a measured CIF are never read there.

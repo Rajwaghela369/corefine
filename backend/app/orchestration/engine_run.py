@@ -358,7 +358,7 @@ def group_view(group_id: str) -> dict:
     mm = datasets.load_manifest(measured_id)
     inst = mm.instrument.model_dump(exclude_none=True) if mm.instrument else {}
     out["material"], out["reference"] = mm.material, ref_id
-    out["instrument"] = {k: inst.get(k) for k in ("radiation", "wavelength_A", "wavelength_source", "ka2_present")}
+    out["instrument"] = {k: inst.get(k) for k in ("radiation", "radiation_source", "wavelength_A", "wavelength_source", "ka2_present")}
     out["prompt"] = runs[0].prompt
     cert = mm.reference_values or {}
     out["certified"] = {k: cert.get(k) for k in ("a_A", "a_uncertainty_A", "c_A", "c_uncertainty_A", "source") if cert.get(k)}

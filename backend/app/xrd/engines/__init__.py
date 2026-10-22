@@ -111,7 +111,7 @@ def prepare(measured_id: str, reference_id: str, workdir: Path, file: str | None
     cif = workdir / "phase.cif"
     cif.write_bytes(store.get(ref_keys[0]))
     extra = inst.model_extra or {}
-    source = "synchrotron" if "synchrotron" in (inst.radiation or "").lower() else "lab"
+    source = "synchrotron" if inst.synchrotron else "lab"
     return Prepared(workdir, scan, cif, float(inst.wavelength_A), bool(extra.get("ka2_present")), source,
                     key.rsplit("/", 1)[-1], reference_id, notes)
 
@@ -157,17 +157,22 @@ def run_gsas2(pr: Prepared) -> dict:
 MAUD_STAGES = [(0, "background and scale", 5), (1, "cell and basic parameters", 10), (2, "microstructure", 10)]
 
 
-def _maud_home() -> Path:
+def _maud_paths() -> tuple[Path, Path]:
+    """MAUD's own Java and the folder with Maud.jar: Maud/jdk/bin/java + Maud/lib on Linux,
+    Maud.app/Contents/PlugIns/Home/bin/java + Maud.app/Contents/Java in the macOS app bundle."""
     from app.dft import tools
 
     java = tools.managed_executable("maud")
     if not java:
         raise EngineError("MAUD is not installed")
-    return java.parents[2]
+    for lib in (java.parents[2] / "lib", java.parents[3] / "Java"):
+        if (lib / "Maud.jar").is_file():
+            return java, lib
+    raise EngineError(f"MAUD is installed but Maud.jar is not next to {java}")
 
 
-def maud_template(home: Path, pr: Prepared) -> str:
-    with zipfile.ZipFile(home / "lib" / "Maud.jar") as z:
+def maud_template(lib: Path, pr: Prepared) -> str:
+    with zipfile.ZipFile(lib / "Maud.jar") as z:
         t = z.read("files/default.par").decode()
     # the wavelength is the dataset's; Kα2 (MAUD's default line and weight) stays only when the manifest says it is present
     t = t.replace("_diffrn_radiation_wavelength 1.5405982 #min", f"_diffrn_radiation_wavelength {pr.wavelength_A} #min")
@@ -194,14 +199,14 @@ def _par_value(text: str, tag: str) -> tuple[float | None, float | None]:
 
 
 def run_maud(pr: Prepared) -> dict:
-    home = _maud_home()
+    java_exe, lib = _maud_paths()
     out = pr.workdir / "maud"
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(pr.scan, out / "scan.xye")
     shutil.copy2(pr.cif, out / "phase.cif")
-    (out / "start.par").write_text(maud_template(home, pr))
-    java = [str(home / "jdk" / "bin" / "java"), "-Xmx2g", "-Djava.awt.headless=true", "--enable-native-access=ALL-UNNAMED",
-            "--add-opens", "java.base/java.net=ALL-UNNAMED", "-cp", str(home / "lib") + "/*", "com.radiographema.MaudText"]
+    (out / "start.par").write_text(maud_template(lib, pr))
+    java = [str(java_exe), "-Xmx2g", "-Djava.awt.headless=true", "--enable-native-access=ALL-UNNAMED",
+            "--add-opens", "java.base/java.net=ALL-UNNAMED", "-cp", str(lib) + "/*", "com.radiographema.MaudText"]
     stages, prev = [], "start.par"
     for i, (wizard, name, iters) in enumerate(MAUD_STAGES):
         nxt = f"stage{i + 1}.par"

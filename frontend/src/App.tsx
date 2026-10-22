@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { sessionId } from "./api/client";
 import { Header } from "./components/Header";
+import { NavProvider } from "./components/nav";
 import { DetailProvider } from "./components/prefs";
 import { Sidebar, VIEWS, type View } from "./components/Sidebar";
 import { Assistant } from "./panels/Assistant";
 import { AnalyseView } from "./views/AnalyseView";
 import { DftView } from "./views/DftView";
 import { HistoryView, HomeView } from "./views/HomeView";
+import { SoftwareView } from "./views/SoftwareView";
 import { StorageView } from "./views/StorageView";
 
 // Links from before the task-based layout (?view=lab&mode=dft …) still open the right page
@@ -54,7 +56,7 @@ export default function App() {
   const title = VIEWS.find((v) => v.id === view)!.title;
 
   return (
-    <DetailProvider>
+    <DetailProvider><NavProvider go={go}>
       <div className="flex h-full min-w-[1180px] flex-col">
         <Header title={title} assistantOpen={assistantOpen} onToggleAssistant={() => setAssistantOpen((o) => !o)} />
         <div className="flex min-h-0 flex-1">
@@ -64,6 +66,7 @@ export default function App() {
               : view === "data" ? <StorageView />
               : view === "analyse" ? <AnalyseView session={session} runId={runId} setRunId={setRunId} selected={selected} toggle={toggle} onAsk={ask} />
               : view === "simulate" ? <DftView jobId={jobId} setJobId={setJobId} />
+              : view === "software" ? <SoftwareView />
               : <HistoryView onOpenRun={openRun} />}
           </main>
           <Assistant session={session} open={assistantOpen} onClose={() => setAssistantOpen(false)}
@@ -71,6 +74,6 @@ export default function App() {
             pending={pending} onPendingTaken={() => setPending(null)} onRunStarted={openRun} />
         </div>
       </div>
-    </DetailProvider>
+    </NavProvider></DetailProvider>
   );
 }

@@ -4,7 +4,11 @@ export const API = "/api";
 
 export type Role = "measured_pattern" | "reference_structure" | "reference_value";
 export interface DatasetNode { id: string; role: Role | null; valid: boolean; problem: string | null; files: string[];
-  material?: string | null }
+  material?: string | null; technique?: string | null;
+  instrument?: { radiation?: string; radiation_source?: string; wavelength_A?: number } | null }
+/** What an uploaded CIF states about itself; each value with the tag it came from. */
+export interface FileFacts { format: "pdcif" | "cif" | null; role: Role | null;
+  found: Partial<Record<"radiation" | "radiation_source" | "probe" | "wavelength_A" | "material", { value: string | number; tag: string }>> }
 export type StepStatus = "pending" | "running" | "retrying" | "done" | "failed";
 export interface Step { idx: number; name: string; status: StepStatus; attempts: number; error: string | null;
   code_key: string | null; stdout_key: string | null }
@@ -22,7 +26,7 @@ export interface GroupRun { id: string; engine: Engine; label: string; status: s
   curve?: { x: number[]; observed: number[]; calculated: number[]; background: number[] };
   reflections?: { two_theta: number; intensity: number; hkl: string }[]; story: ExperimentStory }
 export interface GroupView { group_id: string; dataset: string; runs: GroupRun[]; material?: string; reference?: string; prompt?: string;
-  instrument?: { radiation?: string; wavelength_A?: number; wavelength_source?: string; ka2_present?: boolean | null };
+  instrument?: { radiation?: string; radiation_source?: string; wavelength_A?: number; wavelength_source?: string; ka2_present?: boolean | null };
   measured?: { file: string; x: number[]; y: number[]; wavelength_A: number };
   certified?: { a_A?: number; a_uncertainty_A?: number; c_A?: number; c_uncertainty_A?: number; source?: string } }
 export interface RunListItem { id: string; prompt: string; title?: string | null; status: string; dataset_ids: string[];
@@ -62,6 +66,11 @@ export const api = {
     return fetch(`${API}/datasets/${id}/files`, { method: "POST", body: fd }).then(json<{ saved: string[] }>);
   },
   rescan: () => fetch(`${API}/datasets/rescan`, { method: "POST" }).then(json),
+  inspectFile: (f: File) => {
+    const fd = new FormData();
+    fd.append("file", f);
+    return fetch(`${API}/datasets/inspect`, { method: "POST", body: fd }).then(json<FileFacts>);
+  },
   runs: () => fetch(`${API}/runs`).then(json<RunListItem[]>),
   run: (id: string) => fetch(`${API}/runs/${id}`).then(json<RunDetail>),
   startRun: (body: ProposedRun & { session_id: string }) =>
@@ -175,7 +184,7 @@ export interface DftRun { code: string; target: string; kind: string; status: st
   message: string; attempts?: number; remote_job_id?: string | null; remote_dir?: string; results: DftResults | null; updated: string }
 export interface DftTarget { name: string; kind: "local" | "slurm"; host: string | null; codes: string[]; confirm: boolean }
 export interface DftTool { name: string; label: string; license: string; size: string; source: string; installable: boolean;
-  status: string; message: string; version: string | null }
+  status: string; message: string; version: string | null; finished?: string | null }
 export interface DftTools { tools: DftTool[]; not_installable: Record<string, string>; code_tools: Record<string, string[]>;
   functional_tools: Record<string, Record<string, string[]>>; local: Record<string, string> }
 export interface MpMaterial { id: string; formula: string; nsites: number; spacegroup: string | null; e_above_hull_eV: number | null;
@@ -209,6 +218,7 @@ export const dft = {
     fetch(`${API}/dft/workflow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(json<{ id: string; plan: DftPlan; runs: string[]; checks_passed: boolean }>),
   installTool: (name: string) => fetch(`${API}/dft/tools/${name}/install`, { method: "POST" }).then(json),
+  toolLog: (name: string) => fetch(`${API}/dft/tools/${name}/log`).then(json<{ name: string; log: string }>),
   startRun: (id: string, code: string, target: string) => fetch(`${API}/dft/jobs/${id}/runs`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, target }) }).then(json<DftRun>),
   importResults: (id: string, code: string, files: File[]) => {
@@ -249,4 +259,6 @@ export const xrd = {
       .then(json<XrdSimulated>),
   importMp: (mp_id: string) => fetch(`${API}/xrd/import/materials-project`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mp_id }) }).then(json<{ dataset: string }>),
+  importCod: (cod_id: string) => fetch(`${API}/xrd/import/cod`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cod_id }) }).then(json<{ dataset: string }>),
 };

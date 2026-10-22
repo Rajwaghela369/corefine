@@ -198,3 +198,18 @@ const TOOLS: Record<string, string> = {
   compare_pattern: "a pattern comparison", identify_phase: "phase identification",
 };
 export const toolLabel = (name: string) => TOOLS[name] ?? name.replaceAll("_", " ");
+
+/** Radiation as people write it: CuKa1 and CIF's 'Cu K\a~1~' both read "Cu Kα1"; anything else is shown as given. */
+export function radiationLabel(r?: string | null): string | null {
+  if (!r) return null;
+  const m = r.trim().replace(/^'|'$/g, "").match(/^([A-Z][a-z]?)\s*K\s*(?:\\a|a|α)\s*(?:~?([12])~?)?$/);
+  return m ? `${m[1]} Kα${m[2] ?? ""}` : r;
+}
+
+/** One line telling scans apart: radiation type or source, and the wavelength. */
+export function instrumentLine(i?: { radiation?: string | null; radiation_source?: string | null; wavelength_A?: number | null } | null): string {
+  if (!i) return "";
+  const what = [radiationLabel(i.radiation), i.radiation_source].filter(Boolean).join(", ");
+  const parts = [what ? what.charAt(0).toUpperCase() + what.slice(1) : null, i.wavelength_A != null ? `λ ${i.wavelength_A} Å` : "wavelength unknown"];
+  return parts.filter(Boolean).join(" · ");
+}

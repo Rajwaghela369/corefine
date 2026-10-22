@@ -81,6 +81,8 @@ class TreeNode:
     problem: str | None
     files: list[str]
     material: str | None = None
+    technique: str | None = None
+    instrument: dict | None = None    # radiation, radiation_source, wavelength_A: enough to tell scans apart in a list
 
 
 def tree(store: ObjectStore | None = None) -> list[TreeNode]:
@@ -94,7 +96,9 @@ def tree(store: ObjectStore | None = None) -> list[TreeNode]:
     for ds_id, files in sorted(folders.items()):
         try:
             m = load_manifest(ds_id, store)
-            nodes.append(TreeNode(ds_id, m.role, True, None, sorted(files), m.material))
+            inst = m.instrument.model_dump(include={"radiation", "radiation_source", "wavelength_A"}, exclude_none=True) \
+                if m.instrument else None
+            nodes.append(TreeNode(ds_id, m.role, True, None, sorted(files), m.material, m.technique, inst))
         except ManifestError as e:
             nodes.append(TreeNode(ds_id, None, False, str(e), sorted(files)))
     return nodes

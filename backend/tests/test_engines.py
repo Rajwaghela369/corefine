@@ -14,7 +14,9 @@ from conftest import BACKEND, SEED
 
 REAL_TOOLS = BACKEND / ".local" / "tools"
 HAS_GSAS2 = (REAL_TOOLS / "envs" / "gsas2" / "bin" / "python").is_file()
-HAS_MAUD = (REAL_TOOLS / "apps" / "maud" / "Maud" / "jdk" / "bin" / "java").is_file()
+MAUD_JAVA = next((p for rel in ("Maud/jdk/bin/java", "Maud.app/Contents/PlugIns/Home/bin/java")  # Linux, macOS
+                  if (p := REAL_TOOLS / "apps" / "maud" / rel).is_file()), None)
+HAS_MAUD = MAUD_JAVA is not None
 
 
 @pytest.fixture
@@ -125,7 +127,7 @@ def test_real_maud_refines_lab6(lab6, tmp_path, monkeypatch):
     from app.dft import tools
     from app.xrd import engines
 
-    monkeypatch.setattr(tools, "managed_executable", lambda code: REAL_TOOLS / "apps" / "maud" / "Maud" / "jdk" / "bin" / "java")
+    monkeypatch.setattr(tools, "managed_executable", lambda code: MAUD_JAVA)
     pr = engines.prepare("nist-srm-660c", "cod-1000057-lab6", tmp_path / "w")
     r = engines.run_maud(pr)
     assert r["cell"]["length_a"] == pytest.approx(4.156826, abs=2e-3)
@@ -145,11 +147,11 @@ def test_maud_template_follows_the_manifest(tmp_path):
     with zipfile.ZipFile(home / "lib" / "Maud.jar", "w") as z:
         z.writestr("files/default.par", par)
     pr = engines.Prepared(tmp_path, tmp_path / "s.xye", tmp_path / "p.cif", 0.41419, False, "synchrotron", "f", "r")
-    t = engines.maud_template(home, pr)
+    t = engines.maud_template(home / "lib", pr)
     assert "1.544497" not in t and "_diffrn_radiation_wavelength 0.41419" in t
     assert "'No Corrections'" in t and "weight_scheme Default" in t
     pr.ka2, pr.source, pr.wavelength_A = True, "lab", 1.5405929
-    t = engines.maud_template(home, pr)
+    t = engines.maud_template(home / "lib", pr)
     assert "1.544497" in t and "Bragg-Brentano" in t
 
 

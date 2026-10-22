@@ -36,6 +36,23 @@ def list_datasets():
     return [n.__dict__ for n in datasets.tree()]
 
 
+@router.post("/inspect")
+async def inspect_file(file: UploadFile):
+    """What an uploaded CIF says about itself (radiation, wavelength, formula ...), to pre-fill the Add-dataset form.
+    Nothing is stored."""
+    from app.storage import inspect
+
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, detail="file larger than 100 MB")
+    if not (file.filename or "").lower().endswith(".cif"):
+        return {"format": None, "role": None, "found": {}}
+    try:
+        return inspect.inspect_cif(data.decode(errors="replace"))
+    except (ValueError, RuntimeError) as e:
+        _bad(ValueError(f"{file.filename} is not readable CIF: {e}"))
+
+
 @router.post("")
 def create_dataset(body: CreateDataset):
     try:

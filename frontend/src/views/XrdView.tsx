@@ -5,7 +5,7 @@ import { api, type GroupRun, type GroupView } from "../api/client";
 import { ClaimBadge } from "../components/ClaimBadge";
 import { Legend, Node } from "../components/Flow";
 import { LiveReasoning, LiveStatus } from "../components/LiveReasoning";
-import { friendlyError, runTitle, verdict } from "../components/labels";
+import { friendlyError, radiationLabel, runTitle, verdict } from "../components/labels";
 import { useDetailed } from "../components/prefs";
 import { Dot, Sections } from "../components/Sections";
 import { Button, Empty, Status, Tag, type Tone, clock, cn, duration } from "../components/ui";
@@ -65,7 +65,7 @@ export function AnalysisWorkspace({ id, tab, onClose, onAsk }: { id: string; tab
         <div className="mx-5 mt-3 space-y-2">{d.runs.map((r) => <Verdict key={r.id} id={r.id} label={d.runs.length > 1 ? r.label : null} />)}</div>
         <div className="mt-3 grid grid-cols-4 border-t border-line">
           <Cellv label="Measured scan" value={d.measured?.file ?? "—"} small />
-          <Cellv label="Wavelength" value={`${d.instrument?.wavelength_A ?? "—"} Å`} sub={`${d.instrument?.radiation ?? ""}${d.instrument?.ka2_present ? " · Kα1 + Kα2" : ""}`} mono />
+          <Cellv label="Wavelength" value={`${d.instrument?.wavelength_A ?? "—"} Å`} sub={`${[radiationLabel(d.instrument?.radiation), d.instrument?.radiation_source].filter(Boolean).join(", ")}${d.instrument?.ka2_present ? " · Kα1 + Kα2" : ""}`} mono />
           <Cellv label="Certified" value={cert.a_A != null ? `a ${f(cert.a_A)} Å` : "none on file"} sub={cert.c_A != null ? `c ${f(cert.c_A)} Å` : cert.a_uncertainty_A ? `± ${cert.a_uncertainty_A} Å (k = 2)` : undefined} mono />
           <div className="border-l border-line px-5 py-2.5">
             <div className="text-[11px] text-muted">Refined a</div>

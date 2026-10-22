@@ -1,7 +1,7 @@
-import { Atom, Database, FlaskConical, History, Home } from "lucide-react";
+import { Atom, Database, FlaskConical, History, Home, Package } from "lucide-react";
 import { cn } from "./ui";
 
-export type View = "home" | "data" | "analyse" | "simulate" | "history";
+export type View = "home" | "data" | "analyse" | "simulate" | "history" | "software";
 
 export const VIEWS: { id: View; label: string; title: string; icon: typeof Database; hint: string }[] = [
   { id: "home", label: "Home", title: "Home", icon: Home, hint: "Start here" },
@@ -9,6 +9,7 @@ export const VIEWS: { id: View; label: string; title: string; icon: typeof Datab
   { id: "analyse", label: "Analyse", title: "Analyse a measured scan", icon: FlaskConical, hint: "Analyse an X-ray diffraction scan (experiment)" },
   { id: "simulate", label: "Simulate", title: "Simulate a material", icon: Atom, hint: "Calculate a material's properties (DFT theory)" },
   { id: "history", label: "History", title: "All analyses", icon: History, hint: "Every analysis you have run" },
+  { id: "software", label: "Software", title: "Software", icon: Package, hint: "Install the programs that run on this computer" },
 ];
 
 export function Sidebar({ view, onChange }: { view: View; onChange: (v: View) => void }) {

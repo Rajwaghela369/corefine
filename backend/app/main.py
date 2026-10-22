@@ -17,6 +17,10 @@ async def lifespan(app: FastAPI):
     init_db()
     if stale := runs.fail_interrupted_runs():
         logging.getLogger("corefine").warning("marked interrupted runs as failed: %s", ", ".join(stale))
+    from app.dft import tools
+
+    if settled := tools.recover_interrupted():
+        logging.getLogger("corefine").warning("settled interrupted installs: %s", ", ".join(settled))
     yield
 
 

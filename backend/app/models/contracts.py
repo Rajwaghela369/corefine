@@ -16,11 +16,31 @@ Classification = Literal[
 
 # --- Data -------------------------------------------------------------------
 
+RADIATION_SOURCES = ("sealed X-ray tube", "rotating-anode X-ray tube", "synchrotron", "nuclear reactor",
+                     "spallation source", "electron microscope")  # the coreCIF _diffrn_source examples
+
+
 class Instrument(BaseModel):
+    """Named after coreCIF: radiation = _diffrn_radiation_type (Siegbahn notation, e.g. 'Cu K\\a~1~' or CuKa1),
+    radiation_source = _diffrn_source (tube, synchrotron, reactor ...), probe = _diffrn_radiation_probe."""
+
     model_config = ConfigDict(extra="allow")
     radiation: str | None = None
+    radiation_source: str | None = None
+    probe: Literal["x-ray", "neutron", "electron", "gamma"] | None = None
     wavelength_A: float | None = None
     wavelength_source: str | None = None
+
+    @model_validator(mode="after")
+    def _source_given_as_radiation(self):
+        # older manifests (and NIST's 11-BM files) put the source in the radiation type: "synchrotron"
+        if self.radiation_source is None and self.radiation and self.radiation.strip().lower() == "synchrotron":
+            self.radiation_source, self.radiation = "synchrotron", None
+        return self
+
+    @property
+    def synchrotron(self) -> bool:
+        return (self.radiation_source or "").lower() == "synchrotron"
 
 
 class Manifest(BaseModel):
