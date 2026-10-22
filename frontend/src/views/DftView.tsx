@@ -40,9 +40,9 @@ function DftWelcome({ onOpen }: { onOpen: (id: string) => void }) {
         { icon: Play, title: "Plan and run", text: "The plan and its reasons are shown, inputs are checked, and installed codes run one after another." },
         { icon: Sigma, title: "Read the results", text: "Band gap and convergence per code, next to Materials Project; Theory ↔ Experiment shows how it went." },
       ]}>
-      <WelcomeSection title={`Codes (${cfg.data?.codes.length ?? "…"})`}>
+      <WelcomeSection title={`Programs ready to use (${(cfg.data?.codes ?? []).filter((c) => c.available).length})`}>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {(cfg.data?.codes ?? []).map((c) => (
+          {(cfg.data?.codes ?? []).filter((c) => c.available).map((c) => (
             <div key={c.name} className="rounded-lg border border-line bg-surface px-3 py-2.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[13px] font-semibold">{c.label}</span>
@@ -52,6 +52,15 @@ function DftWelcome({ onOpen }: { onOpen: (id: string) => void }) {
             </div>
           ))}
         </div>
+        {(cfg.data?.codes ?? []).some((c) => !c.available) && <details className="mt-2 rounded-lg border border-line bg-surface">
+          <summary className="cursor-pointer px-3 py-2 text-[12.5px] text-ink-2">
+            {(cfg.data?.codes ?? []).filter((c) => !c.available).length} more programs need setup before they can be used</summary>
+          <ul className="divide-y divide-line border-t border-line">
+            {(cfg.data?.codes ?? []).filter((c) => !c.available).map((c) => (
+              <li key={c.name} className="px-3 py-2 text-[12px]"><span className="font-medium">{c.label}</span>
+                <span className="text-muted"> · {c.method}</span><div className="text-[11.5px] text-muted">{c.reason}</div></li>))}
+          </ul>
+        </details>}
       </WelcomeSection>
       {(jobs.data?.length ?? 0) > 0 && <WelcomeSection title="Recent sets">
         <div className="grid gap-2 sm:grid-cols-2">
@@ -172,12 +181,11 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
         </div>
         <div>
           <div className="mb-1.5 flex items-baseline justify-between">
-            <span className="text-xs font-medium text-ink-2">Codes</span>
-            <span className="text-[11px] text-muted">{registry.filter((c) => c.available).length} of {registry.length} available here</span>
+            <span className="text-xs font-medium text-ink-2">Programs</span>
+            <span className="text-[11px] text-muted">{registry.filter((c) => c.available).length} of {registry.length} ready</span>
           </div>
-          <CodeInstaller />
           <div className="grid grid-cols-2 gap-2">
-            {registry.map((c) => (
+            {registry.filter((c) => c.available).map((c) => (
               <button key={c.name} onClick={() => toggleCode(c.name)} disabled={!c.available} title={c.reason}
                 className={cn("rounded-md border px-2.5 py-1.5 text-left text-xs disabled:opacity-40",
                   codes.includes(c.name) ? "border-accent bg-accent-soft text-accent" : "border-line-strong text-ink-2")}>
@@ -186,6 +194,7 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
               </button>
             ))}
           </div>
+          <CodeInstaller />
         </div>
         <p className="text-[11px] leading-4 text-muted">Everything else stays at each code's documented defaults; the generated set lists them.</p>
         {kind === "find" ? <>
@@ -219,8 +228,10 @@ function DftForm({ onCreated, selected, onSelect }: { onCreated: (id: string) =>
 }
 
 function MaterialSearch({ picked, onPick }: { picked: MpMaterial | null; onPick: (m: MpMaterial) => void }) {
-  const [q, setQ] = useState("");
-  const [query, setQuery] = useState("");
+  // arriving from Theory vs experiment with a material already chosen starts the search for it
+  const initial = new URLSearchParams(window.location.search).get("material") ?? "";
+  const [q, setQ] = useState(initial);
+  const [query, setQuery] = useState(initial);
   const res = useQuery({ queryKey: ["mp-search", query], queryFn: () => dft.searchMaterials(query), enabled: !!query });
   return (
     <div>
@@ -275,8 +286,13 @@ function CodeInstaller() {
     Object.entries(t?.functional_tools[c.name] ?? {}).map(([xc, names]) => ({ code: c, xc, parts: names.map((n) => byName[n]).filter(Boolean) })))
     .filter((l) => l.parts.length && l.parts.some((x) => x.status !== "installed"));
   if (!t || (!missing.length && !libs.length)) return null;
+  const busyAny = (t.tools ?? []).some((x) => x.status === "installing");
   return (
-    <div className="mb-2 space-y-1.5 rounded-md border border-line bg-subtle/60 p-2">
+    <details open={busyAny} className="mt-2 rounded-md border border-line bg-subtle/60">
+      <summary className="cursor-pointer px-2.5 py-1.5 text-[11.5px] text-ink-2">
+        {missing.length ? `${missing.length} more program${missing.length > 1 ? "s" : ""} need setup` : "Optional add-ons"}
+        {libs.length > 0 && missing.length > 0 && ` · ${libs.length} optional add-on${libs.length > 1 ? "s" : ""}`}</summary>
+    <div className="space-y-1.5 border-t border-line p-2">
       {missing.map((c) => {
         const names = t.code_tools[c.name];
         const parts = (names ?? []).map((n) => byName[n]).filter(Boolean);
@@ -315,6 +331,7 @@ function CodeInstaller() {
         );
       })}
     </div>
+    </details>
   );
 }
 

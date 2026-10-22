@@ -24,11 +24,12 @@ export interface GroupRun { id: string; engine: Engine; label: string; status: s
 export interface GroupView { group_id: string; dataset: string; runs: GroupRun[];
   measured?: { file: string; x: number[]; y: number[]; wavelength_A: number };
   certified?: { a_A?: number; a_uncertainty_A?: number; c_A?: number; c_uncertainty_A?: number; source?: string } }
-export interface RunListItem { id: string; prompt: string; status: string; dataset_ids: string[];
+export interface RunListItem { id: string; prompt: string; title?: string | null; status: string; dataset_ids: string[];
+  error?: string | null; archived?: boolean;
   engine?: Engine; group_id?: string | null;
   parent_run_id: string | null; classification: string | null; claim_passed: boolean | null;
   started_at: string | null; finished_at: string | null; headline: Headline | null }
-export interface RunDetail extends Omit<RunListItem, "claim_passed"> {
+export interface RunDetail extends Omit<RunListItem, "claim_passed" | "title" | "archived"> {
   plan: { title: string; summary: string; steps: PlanStep[] } | null; error: string | null;
   claim_check: ClaimCheck | null; steps: Step[]; metrics: Metric[];
   artifacts: { step_idx: number | null; kind: string; path: string; sha256: string }[] }
@@ -65,6 +66,9 @@ export const api = {
   startRun: (body: ProposedRun & { session_id: string }) =>
     fetch(`${API}/runs`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body) }).then(json<{ id: string; ids: string[]; group_id: string | null }>),
+  archiveRun: (id: string, archived: boolean) =>
+    fetch(`${API}/runs/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }) }).then(json<{ id: string; archived: boolean }>),
   engines: () => fetch(`${API}/runs/engines`).then(json<EngineInfo[]>),
   group: (id: string) => fetch(`${API}/runs/group/${id}`).then(json<GroupView>),
   artifactText: (runId: string, path: string) => fetch(`${API}/runs/${runId}/artifacts/${path}`).then((r) => r.text()),
@@ -79,9 +83,10 @@ export interface Health { mode: string; all_ok: boolean; services: Record<string
 export interface SseEvent { event: string; data: any }
 
 /** POST /chat returns an SSE stream; EventSource only does GET, so parse the stream by hand. */
-export async function* chatStream(session_id: string, message: string, dataset_ids: string[]): AsyncGenerator<SseEvent> {
+export async function* chatStream(session_id: string, message: string, dataset_ids: string[],
+  run_id: string | null = null): AsyncGenerator<SseEvent> {
   const r = await fetch(`${API}/chat`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id, message, dataset_ids }) });
+    body: JSON.stringify({ session_id, message, dataset_ids, run_id }) });
   if (!r.ok || !r.body) throw new Error(`chat failed: ${r.status}`);
   const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";

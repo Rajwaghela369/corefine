@@ -53,7 +53,7 @@ certification does. This is a hypothesis, not tested.
   fastembed's dependencies. **The sandbox snapshot uses Python 3.13**, the newest series Daytona's
   `Image.debian_slim` accepts.
 - **Local mode** (`COREFINE_MODE=local`): disk instead of S3, SQLite instead of Neon, local Qdrant,
-  a subprocess runner instead of Daytona, Langfuse off. Used for development, tests and the
+  a subprocess runner instead of Daytona. Used for development, tests and the
   venue-Wi-Fi fallback. Cloud mode uses the managed services.
 - **The local runner is not network-isolated.** There is no Docker and unprivileged user namespaces are
   blocked on the dev laptop, so `LocalDockerRunner` became a subprocess runner. A sitecustomize hook
@@ -74,3 +74,5 @@ certification does. This is a hypothesis, not tested.
 - **`start_run` in chat only proposes a run.** It starts only when the user clicks Confirm in the UI.
 - **The schema is created with SQLAlchemy `create_all`** (idempotent), not Alembic migrations.
 - **shadcn/ui-style components are hand-written** with Tailwind; the shadcn generator was not run.
+- **Langfuse removed.** Tracing was dropped on request (2026-10-22); `/health` checks five services
+  and no `LANGFUSE_*` settings exist. The spec items about Langfuse traces no longer apply.

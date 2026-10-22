@@ -14,7 +14,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import analyst, checks, coder, planner
-from app.agents.llm import LLMError, trace_span
+from app.agents.llm import LLMError
 from app.config import get_settings
 from app.models.contracts import Manifest, Metric, Plan, RunRequest
 from app.models.db import utcnow
@@ -68,6 +68,9 @@ def build_graph(ctx: _Ctx):
 
     def plan_node(state: RunState) -> RunState:
         rec.run_update(status="planning", started_at=utcnow())
+        # Sandbox first: a missing snapshot or quota error should fail before any Claude call is spent
+        ctx.sandbox = get_runner().open(state["run_id"])
+        ctx.sandbox.stage_inputs(datasets.staged_inputs(ctx.req.dataset_ids, ctx.store))
         parent_ctx = None
         if ctx.req.parent_run_id:
             parent_ctx = _parent_context(ctx.store, ctx.req.parent_run_id)
@@ -77,8 +80,6 @@ def build_graph(ctx: _Ctx):
         rec.run_update(plan=plan.model_dump(), status="running")
         rec.steps_init([(st.idx, st.name) for st in plan.steps])
         rec.log("planner", f"planned {len(plan.steps)} steps: " + ", ".join(st.name for st in plan.steps))
-        ctx.sandbox = get_runner().open(state["run_id"])
-        ctx.sandbox.stage_inputs(datasets.staged_inputs(ctx.req.dataset_ids, ctx.store))
         return {"plan": plan.model_dump(), "cursor": 0, "attempt": 1, "last_code": None, "last_error": None,
                 "produced": {}, "metric_keys": []}
 
@@ -234,8 +235,7 @@ def execute_run(run_id: str, req: RunRequest) -> None:
     try:
         ctx = _Ctx(run_id, req)
         graph = build_graph(ctx)
-        with trace_span(f"run {run_id}", input=req.model_dump()):
-            graph.invoke({"run_id": run_id, "request": req.model_dump()}, {"recursion_limit": 200})
+        graph.invoke({"run_id": run_id, "request": req.model_dump()}, {"recursion_limit": 200})
     except (LLMError, datasets.ManifestError, ValueError) as e:
         _fail(ctx, run_id, str(e))
     except Exception as e:  # noqa: BLE001 — a run must end in a recorded state whatever happens

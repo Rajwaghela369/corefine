@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.models.contracts import RunRequest
@@ -21,6 +22,25 @@ from app.storage.objects import get_store
 router = APIRouter(prefix="/runs", tags=["runs"])
 _pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="run")
 _id_lock = threading.Lock()
+
+
+ACTIVE = ("queued", "planning", "running", "analysing")
+
+
+def fail_interrupted_runs() -> list[str]:
+    """Runs execute in this process's threads, so any run still active at startup was cut off.
+    Assumes a single backend process: a second worker starting would fail the first one's live runs."""
+    from sqlalchemy import update
+
+    with get_sessionmaker()() as db, db.begin():
+        ids = list(db.scalars(select(RunRow.id).where(RunRow.status.in_(ACTIVE))))
+        if ids:
+            db.execute(update(RunRow).where(RunRow.id.in_(ids)).values(
+                status="failed", finished_at=datetime.now(UTC),
+                error="interrupted: the backend restarted while this run was in progress"))
+            db.execute(update(StepRow).where(StepRow.run_id.in_(ids), StepRow.status.in_(("running", "retrying")))
+                       .values(status="failed", error="interrupted by a backend restart"))
+    return ids
 
 
 def _new_run_id() -> str:
@@ -95,12 +115,28 @@ def list_runs(limit: int = 50):
         out = []
         for r in runs:
             ms = list(db.scalars(select(MetricRow).where(MetricRow.run_id == r.id, MetricRow.name == "a_refined")))
-            out.append({"id": r.id, "prompt": r.prompt, "status": r.status, "dataset_ids": r.dataset_ids,
-                        "engine": r.engine or "agents", "group_id": r.group_id,
+            out.append({"id": r.id, "prompt": r.prompt, "title": (r.plan or {}).get("title"), "status": r.status,
+                        "dataset_ids": r.dataset_ids, "error": (r.error or "")[:400] or None,
+                        "archived": bool(r.archived), "engine": r.engine or "agents", "group_id": r.group_id,
                         "parent_run_id": r.parent_run_id, "classification": r.classification,
                         "claim_passed": (r.claim_check or {}).get("passed"),
                         "started_at": r.started_at, "finished_at": r.finished_at, "headline": headline(ms)})
     return out
+
+
+class RunPatch(BaseModel):
+    archived: bool
+
+
+@router.patch("/{run_id}")
+def patch_run(run_id: str, body: RunPatch):
+    """Archiving only hides a run from the default list; nothing is deleted."""
+    with get_sessionmaker()() as db, db.begin():
+        r = db.get(RunRow, run_id)
+        if r is None:
+            raise HTTPException(404, detail=f"no run {run_id}")
+        r.archived = body.archived
+    return {"id": run_id, "archived": body.archived}
 
 
 @router.get("/compare")

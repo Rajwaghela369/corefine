@@ -12,8 +12,8 @@ function reduced(formula: string): string {
   return parts.map(([el, n]) => el + (n / g === 1 ? "" : String(n / g))).join("");
 }
 
-type Actor = "input" | "llm" | "code" | "program" | "result";
-const ACTOR: Record<Actor, { icon: typeof Bot; ring: string; label: string }> = {
+export type Actor = "input" | "llm" | "code" | "program" | "result";
+export const ACTOR: Record<Actor, { icon: typeof Bot; ring: string; label: string }> = {
   input: { icon: Database, ring: "border-line-strong text-muted", label: "data" },
   llm: { icon: Bot, ring: "border-accent text-accent", label: "language model" },
   code: { icon: Code2, ring: "border-ink-2 text-ink-2", label: "code" },
@@ -25,7 +25,7 @@ const f = (v: number | null | undefined, d = 6) => (v == null ? "—" : v.toFixe
 
 /** One material, both directions: what the experiment pipeline and the theory pipeline each did, step by step, who did
  *  it (language model, code or a scientific program), why, and what came out. Everything is read from run and set files. */
-export function BridgeView() {
+export function BridgeView({ onGo }: { onGo: (to: "analyse" | "simulate", material?: string) => void }) {
   const ds = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
   const jobs = useQuery({ queryKey: ["dft-jobs"], queryFn: dft.jobs });
   const materials = [...new Set([...(ds.data ?? []).filter((n) => n.valid && n.role === "measured_pattern" && n.material).map((n) => reduced(n.material as string)),
@@ -55,10 +55,13 @@ export function BridgeView() {
           <>
             <div className="grid gap-4 lg:grid-cols-2">
               <Column icon={FlaskConical} title="Experiment" sub="measured scan → refined lattice parameter"
-                empty={`No XRD analysis of ${current} yet. Start one under Experiment · XRD (agents, GSAS-II or MAUD).`}
+                empty={`No analysis of a measured ${current} scan yet.`}
+                cta={<Button size="sm" variant="primary" onClick={() => onGo("analyse", current)}>Analyse a {current} scan</Button>}
+                initial={(d?.experiment ?? []).findIndex((e) => e.status === "done")}
                 items={d?.experiment ?? []} label={(e) => `${e.run} · ${ENGINE[e.engine]}`} render={(e) => <ExperimentFlow e={e} />} />
               <Column icon={Atom} title="Theory" sub="crystal structure → DFT in every code → band gap"
-                empty={`No DFT set for ${current} yet. Pick it under Theory · DFT and generate one.`}
+                empty={`No simulation of ${current} yet.`}
+                cta={<Button size="sm" variant="primary" onClick={() => onGo("simulate", current)}>Set up a {current} simulation</Button>}
                 items={d?.theory ?? []} label={(t) => `${t.request.functional} · k ${t.request.kmesh.join("×")} · ${t.set.slice(4, 17)}`}
                 render={(t) => <TheoryFlow t={t} />} />
             </div>
@@ -70,7 +73,7 @@ export function BridgeView() {
   );
 }
 
-function Legend() {
+export function Legend() {
   return (
     <div className="flex flex-wrap gap-3 text-[11.5px] text-muted">
       {(Object.keys(ACTOR) as Actor[]).map((a) => { const A = ACTOR[a]; return (
@@ -80,9 +83,10 @@ function Legend() {
   );
 }
 
-function Column<T>({ icon: Icon, title, sub, items, label, render, empty }: { icon: typeof Atom; title: string; sub: string; items: T[];
-  label: (t: T) => string; render: (t: T) => ReactNode; empty: string }) {
-  const [i, setI] = useState(0);
+function Column<T>({ icon: Icon, title, sub, items, label, render, empty, cta, initial = 0 }: { icon: typeof Atom; title: string; sub: string; items: T[];
+  label: (t: T) => string; render: (t: T) => ReactNode; empty: string; cta?: ReactNode; initial?: number }) {
+  const [picked, setI] = useState<number | null>(null);
+  const i = picked ?? Math.max(0, initial);
   const item = items[Math.min(i, items.length - 1)];
   return (
     <section className="rounded-lg border border-line bg-surface">
@@ -93,12 +97,12 @@ function Column<T>({ icon: Icon, title, sub, items, label, render, empty }: { ic
       {items.length > 1 && <div className="flex flex-wrap gap-1 border-b border-line px-3 py-1.5">
         {items.map((t, k) => <button key={k} onClick={() => setI(k)} className={cn("rounded px-2 py-0.5 font-mono text-[11px]",
           k === i ? "bg-ink text-white" : "text-muted hover:bg-subtle")}>{label(t)}</button>)}</div>}
-      <div className="p-4">{item ? render(item) : <p className="text-[12.5px] text-muted">{empty}</p>}</div>
+      <div className="p-4">{item ? render(item) : <div className="space-y-2.5"><p className="text-[12.5px] text-muted">{empty}</p>{cta}</div>}</div>
     </section>
   );
 }
 
-function Node({ actor, who, title, status, children, last }: { actor: Actor; who: string; title: ReactNode; status?: string;
+export function Node({ actor, who, title, status, children, last }: { actor: Actor; who: string; title: ReactNode; status?: string;
   children?: ReactNode; last?: boolean }) {
   const A = ACTOR[actor];
   return (

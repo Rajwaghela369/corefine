@@ -49,7 +49,10 @@ class DaytonaSession:
         )
         t0 = time.monotonic()
         resp = self._exec(f"bash -lc {shlex.quote(cmd)}", timeout=timeout_s + 30)
-        exit_code = int((resp.result or "").strip().splitlines()[-1])
+        lines = (resp.result or "").strip().splitlines()
+        if not lines or not lines[-1].strip().lstrip("-").isdigit():
+            raise RuntimeError(f"sandbox returned no exit status for {script_name}: {(resp.result or '')[-300:]!r}")
+        exit_code = int(lines[-1])
         logs = self.sb.fs.download_files([
             FileDownloadRequest(source=f"{w}/logs/stdout.txt"), FileDownloadRequest(source=f"{w}/logs/stderr.txt"),
         ])
@@ -107,4 +110,8 @@ class DaytonaRunner:
         return DaytonaSession(self.client, sb, self.settings)
 
     def ping(self) -> None:
-        self.client.snapshot.get(self.settings.DAYTONA_SNAPSHOT)
+        snap = self.client.snapshot.get(self.settings.DAYTONA_SNAPSHOT)
+        state = getattr(snap.state, "value", snap.state)
+        if state != "active":
+            reason = f" ({snap.error_reason})" if snap.error_reason else ""
+            raise RuntimeError(f"snapshot {self.settings.DAYTONA_SNAPSHOT} is {state}, not ready for runs{reason}")

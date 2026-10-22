@@ -18,7 +18,7 @@ Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified dev
 - Use the managed services through their official SDKs; never self-host or reimplement them. Local
   mode exists only for development, tests and the venue fallback.
 - Secrets live only in `backend/.env`. The frontend and the sandbox never receive keys.
-- All Claude calls go through `app/agents/llm.py` (Langfuse tracing, model names from config,
+- All Claude calls go through `app/agents/llm.py` (model names from config,
   structured outputs). The chat co-pilot uses `langchain-anthropic` inside Deep Agents.
 - No number may appear in a report or chat answer unless it comes from `metrics.json`, a manifest
   or a database row. The claim checker (`app/agents/checks.py`) is code and cannot be overridden.

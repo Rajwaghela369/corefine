@@ -19,7 +19,11 @@ export function XrdChart({ x, y, overlays, log, height = 320, curves = [] }:
     if (!el.current) return;
     const hasData = x.length > 0;
     const xs = hasData ? x : overlays.flatMap((o) => o.peaks.map((p) => p.two_theta)).sort((a, b) => a - b);
-    const ys = hasData ? y.map((v) => (log ? Math.max(v, 1e-3) : v)) : xs.map(() => null);
+    // On a log axis, near-zero background counts plunge downward and read as dense spikes; for display only, clamp
+    // everything below the 10th-percentile positive intensity to it (peaks and the background level are unchanged).
+    const positive = log ? y.filter((v) => v > 0).sort((a, b) => a - b) : [];
+    const floor = positive.length ? positive[Math.floor(positive.length * 0.1)] : 1e-3;
+    const ys = hasData ? y.map((v) => (log ? Math.max(v, floor) : v)) : xs.map(() => null);
     const plot = new uPlot({
       width: el.current.clientWidth, height,
       scales: { x: { time: false }, y: { distr: log ? 3 : 1, range: hasData ? undefined : [0, 1] } },

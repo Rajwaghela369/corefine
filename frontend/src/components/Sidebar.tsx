@@ -1,19 +1,23 @@
-import { Database, FlaskConical } from "lucide-react";
+import { Atom, Database, FlaskConical, GitCompareArrows, History, Home } from "lucide-react";
 import { cn } from "./ui";
 
-export type View = "storage" | "lab";
+export type View = "home" | "data" | "analyse" | "simulate" | "compare" | "history";
 
-const ITEMS: { id: View; label: string; icon: typeof Database; hint: string }[] = [
-  { id: "storage", label: "Storage", icon: Database, hint: "Datasets, uploads and manifests" },
-  { id: "lab", label: "Lab", icon: FlaskConical, hint: "Run and review analyses" },
+export const VIEWS: { id: View; label: string; title: string; icon: typeof Database; hint: string }[] = [
+  { id: "home", label: "Home", title: "Home", icon: Home, hint: "Start here" },
+  { id: "data", label: "Data", title: "Your data", icon: Database, hint: "Scans, structures, uploads and documentation" },
+  { id: "analyse", label: "Analyse", title: "Analyse a measured scan", icon: FlaskConical, hint: "Analyse an X-ray diffraction scan (experiment)" },
+  { id: "simulate", label: "Simulate", title: "Simulate a material", icon: Atom, hint: "Calculate a material's properties (DFT theory)" },
+  { id: "compare", label: "Compare", title: "Theory vs experiment", icon: GitCompareArrows, hint: "Measurement and simulation side by side" },
+  { id: "history", label: "History", title: "All analyses", icon: History, hint: "Every analysis you have run" },
 ];
 
 export function Sidebar({ view, onChange }: { view: View; onChange: (v: View) => void }) {
   return (
-    <nav className="flex w-[72px] shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3" aria-label="Main">
-      {ITEMS.map(({ id, label, icon: Icon, hint }) => (
+    <nav className="flex w-[76px] shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3" aria-label="Main">
+      {VIEWS.map(({ id, label, icon: Icon, hint }) => (
         <button key={id} onClick={() => onChange(id)} title={hint} aria-current={view === id ? "page" : undefined}
-          className={cn("flex w-[60px] flex-col items-center gap-1 rounded-md py-2 text-[11px] font-medium transition-colors",
+          className={cn("flex w-[64px] flex-col items-center gap-1 rounded-md py-2 text-[11px] font-medium transition-colors",
             view === id ? "bg-accent-soft text-accent" : "text-muted hover:bg-subtle hover:text-ink")}>
           <Icon size={18} strokeWidth={1.75} />
           {label}

@@ -1,8 +1,7 @@
-"""The one module that calls Claude. Every call is traced in Langfuse (when keys are set) and uses
-model names from config. Agents get typed, schema-validated output via structured outputs."""
+"""The one module that calls Claude. Model names come from config; agents get typed,
+schema-validated output via structured outputs."""
 
 import base64
-from contextlib import nullcontext
 from functools import lru_cache
 from typing import TypeVar
 
@@ -24,22 +23,6 @@ class LLMError(RuntimeError):
 def get_client() -> anthropic.Anthropic:
     s = get_settings()
     return anthropic.Anthropic(api_key=s.ANTHROPIC_API_KEY or None, max_retries=3)
-
-
-@lru_cache
-def get_langfuse():
-    s = get_settings()
-    if not s.langfuse_enabled:
-        return None
-    from langfuse import Langfuse
-
-    return Langfuse(public_key=s.LANGFUSE_PUBLIC_KEY, secret_key=s.LANGFUSE_SECRET_KEY, host=s.LANGFUSE_HOST or None)
-
-
-def trace_span(name: str, **kwargs):
-    """A Langfuse span (or a no-op) to group a run's LLM calls into one trace."""
-    lf = get_langfuse()
-    return lf.start_as_current_observation(name=name, as_type="span", **kwargs) if lf else nullcontext()
 
 
 def image_block(png: bytes) -> dict:
@@ -65,25 +48,14 @@ def parse(*, agent: str, system: str, content: list[dict] | str, output: type[T]
         kwargs["extra_headers"] = {"anthropic-beta": FALLBACK_BETA}
         kwargs["extra_body"] = {"fallbacks": "default"}
 
-    lf = get_langfuse()
-    gen = (lf.start_as_current_observation(name=agent, as_type="generation", model=model,
-                                           input={"system": system, "content": _loggable(content)})
-           if lf else nullcontext())
-    with gen as g:
-        try:
-            # Streamed so large max_tokens (the Coder's 32k) passes the SDK's 10-minute non-streaming guard
-            with get_client().messages.stream(**kwargs) as stream:
-                resp = stream.get_final_message()
-        except anthropic.APIStatusError as e:
-            if g:
-                g.update(level="ERROR", status_message=str(e))
-            raise LLMError(f"{agent}: API error {e.status_code}: {e.message}") from e
-        except anthropic.APIConnectionError as e:
-            raise LLMError(f"{agent}: could not reach the Anthropic API") from e
-        if g:
-            g.update(output=resp.parsed_output.model_dump() if resp.parsed_output else None,
-                     usage_details={"input": resp.usage.input_tokens, "output": resp.usage.output_tokens},
-                     metadata={"stop_reason": resp.stop_reason, "request_id": getattr(resp, "_request_id", None)})
+    try:
+        # Streamed so large max_tokens (the Coder's 32k) passes the SDK's 10-minute non-streaming guard
+        with get_client().messages.stream(**kwargs) as stream:
+            resp = stream.get_final_message()
+    except anthropic.APIStatusError as e:
+        raise LLMError(f"{agent}: API error {e.status_code}: {e.message}") from e
+    except anthropic.APIConnectionError as e:
+        raise LLMError(f"{agent}: could not reach the Anthropic API") from e
     if resp.stop_reason == "refusal":
         cat = resp.stop_details.category if resp.stop_details else None
         raise LLMError(f"{agent}: model declined the request (category: {cat})")
@@ -92,12 +64,6 @@ def parse(*, agent: str, system: str, content: list[dict] | str, output: type[T]
     if resp.parsed_output is None:
         raise LLMError(f"{agent}: no structured output returned")
     return resp.parsed_output
-
-
-def _loggable(content):
-    if isinstance(content, str):
-        return content
-    return [b if b.get("type") != "image" else {"type": "image", "omitted": True} for b in content]
 
 
 def ping() -> None:

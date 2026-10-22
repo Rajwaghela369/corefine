@@ -15,11 +15,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app: FastAPI):
     get_settings()  # fails fast, naming any missing key, in cloud mode
     init_db()
+    if stale := runs.fail_interrupted_runs():
+        logging.getLogger("corefine").warning("marked interrupted runs as failed: %s", ", ".join(stale))
     yield
-    from app.agents.llm import get_langfuse
-
-    if lf := get_langfuse():
-        lf.flush()
 
 
 app = FastAPI(title="CoRefine", version="0.1.0", lifespan=lifespan)

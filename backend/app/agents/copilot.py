@@ -326,16 +326,18 @@ def _text(content) -> str:
     return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
 
 
-def chat(session_id: str, message: str, selected_dataset_ids: list[str] | None = None) -> Iterator[dict]:
+def chat(session_id: str, message: str, selected_dataset_ids: list[str] | None = None,
+         open_run_id: str | None = None) -> Iterator[dict]:
     """Yields events: tool_call, tool_result, answer (with claim check and any proposed run)."""
     if not get_settings().ANTHROPIC_API_KEY:
         raise RuntimeError("The co-pilot needs ANTHROPIC_API_KEY in backend/.env; nothing was sent or saved.")
     history = _history(session_id)
-    user = message if not selected_dataset_ids else f"{message}\n\n(Datasets selected in the UI: {selected_dataset_ids})"
+    user = message
+    if selected_dataset_ids:
+        user += f"\n\n(Datasets selected in the UI: {selected_dataset_ids})"
+    if open_run_id:
+        user += f"\n\n(Run open on screen: {open_run_id}; \"this run\" means it.)"
     config = {"recursion_limit": 40}
-    lf_handler = _langfuse_handler()
-    if lf_handler:
-        config["callbacks"] = [lf_handler]
 
     tool_texts: list[str] = []
     proposed = None
@@ -363,15 +365,6 @@ def chat(session_id: str, message: str, selected_dataset_ids: list[str] | None =
     _save(session_id, "user", message)
     _save(session_id, "assistant", final)
     yield {"type": "answer", "content": final, "claim_check": claim, "proposed_run": proposed}
-
-
-def _langfuse_handler():
-    if not get_settings().langfuse_enabled:
-        return None
-    llm.get_langfuse()
-    from langfuse.langchain import CallbackHandler
-
-    return CallbackHandler()
 
 
 class _Summary(BaseModel):

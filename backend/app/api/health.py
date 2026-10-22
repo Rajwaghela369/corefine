@@ -1,4 +1,4 @@
-"""/health checks the six services. In local mode it says which local stand-in is in use."""
+"""/health checks the five services. In local mode it says which local stand-in is in use."""
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
@@ -50,19 +50,7 @@ def _anthropic():
     return get_settings().MODEL_MAIN
 
 
-def _langfuse():
-    from app.agents.llm import get_langfuse
-
-    lf = get_langfuse()
-    if lf is None:
-        return "off (no keys; tracing disabled)"
-    if not lf.auth_check():
-        raise RuntimeError("auth check failed")
-    return "langfuse cloud"
-
-
-CHECKS = {"neon": _neon, "s3": _s3, "qdrant": _qdrant, "daytona": _daytona, "anthropic": _anthropic,
-          "langfuse": _langfuse}
+CHECKS = {"neon": _neon, "s3": _s3, "qdrant": _qdrant, "daytona": _daytona, "anthropic": _anthropic}
 
 
 @router.get("/ping")

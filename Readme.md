@@ -199,11 +199,10 @@ the spec errors found while building, and the design decisions.
 | Database | SQLite | Neon Postgres |
 | Search | local Qdrant + FastEmbed | Qdrant Cloud |
 | Sandbox | subprocess (network blocked by hook, **not** isolated) | Daytona, `network_block_all` |
-| Tracing | off | Langfuse Cloud |
 | LLM | Anthropic API (key needed) | Anthropic API |
 
 In cloud mode, a missing key stops startup and the error names it. `GET /health` (or
-`http://localhost:5173/api/health`) checks Neon, S3, Qdrant, Daytona, Anthropic and Langfuse. In
+`http://localhost:5173/api/health`) checks Neon, S3, Qdrant, Daytona and Anthropic. In
 local mode it names the local stand-in it is using for each.
 
 ---
@@ -458,7 +457,7 @@ mode.
 | Group | Keys |
 |---|---|
 | Agents | `ANTHROPIC_API_KEY`, `MODEL_MAIN`, `MODEL_FAST` |
-| Cloud mode | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `DATABASE_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `EMBED_PROVIDER`, `EMBED_MODEL`, `EMBED_DIM`, `DAYTONA_API_KEY`, `DAYTONA_SNAPSHOT`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` |
+| Cloud mode | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `DATABASE_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `EMBED_PROVIDER`, `EMBED_MODEL`, `EMBED_DIM`, `DAYTONA_API_KEY`, `DAYTONA_SNAPSHOT` |
 | Materials | `MP_API_KEY` (a current Materials Project key) |
 | Your own DFT builds | `EXCITING_ROOT`, `QUESTAAL_BIN`, `QUESTAAL_LIB_ROOT` (Spack builds), `QE_PSEUDO_DIR`, `VASP_PP_PATH` |
 | Compute | `COMPUTE_CONFIG` (default `backend/compute.yaml`) |
