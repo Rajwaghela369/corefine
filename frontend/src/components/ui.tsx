@@ -82,13 +82,14 @@ export function Dialog({ title, open, onClose, children, wide }:
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/25 pt-[10vh]" onMouseDown={onClose}>
-      <div className={cn(wide ? "w-[900px]" : "w-[520px]", "max-w-[92vw] rounded-lg border border-line bg-surface shadow-xl")} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-line px-5 py-3">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/25 pt-[6vh]" onMouseDown={onClose}>
+      <div className={cn(wide ? "w-[900px]" : "w-[560px]", "flex max-h-[88vh] max-w-[92vw] flex-col rounded-lg border border-line bg-surface shadow-xl")}
+        onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3">
           <h3 className="text-sm font-semibold">{title}</h3>
           <button onClick={onClose} className="rounded p-1 text-muted hover:bg-subtle" aria-label="Close"><X size={16} /></button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="min-h-0 overflow-auto p-5">{children}</div>
       </div>
     </div>
   );

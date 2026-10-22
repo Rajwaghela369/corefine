@@ -86,6 +86,17 @@ class MetricRow(Base):
     source_key: Mapped[str] = mapped_column(String(512))
 
 
+class DftSetRow(Base):
+    """A simulation set: what the list shows and what its page shows. The set's files are in object storage under
+    dft/<id>/; the computer that runs the codes keeps a working copy only while something runs."""
+
+    __tablename__ = "dft_sets"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    listing: Mapped[dict] = mapped_column(Json)
+    detail: Mapped[dict] = mapped_column(Json)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class MessageRow(Base):
     __tablename__ = "messages"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

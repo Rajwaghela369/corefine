@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FileText, Plus, RefreshCw, Upload } from "lucide-react";
+import { AlertTriangle, ChevronRight, FileText, Plus, RefreshCw, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { api, type DatasetNode, type FileFacts, type ScanPreview, xrd } from "../api/client";
 import { radiationLabel } from "../components/labels";
+import { useDetailed } from "../components/prefs";
 import { Button, Dialog, Empty, Field, PanelHeader, Tag, cn, inputCls, num } from "../components/ui";
 import { XrdInspector } from "./XrdInspector";
 
@@ -86,6 +87,7 @@ function ListRow({ d, active, onClick }: { d: DatasetNode; active: boolean; onCl
 }
 
 function DatasetDetail({ d }: { d: DatasetNode }) {
+  const detailed = useDetailed();
   const qc = useQueryClient();
   const m = useQuery({ queryKey: ["manifest", d.id], queryFn: () => api.manifest(d.id), enabled: d.valid });
   const [text, setText] = useState<string | null>(null);
@@ -147,7 +149,12 @@ function DatasetDetail({ d }: { d: DatasetNode }) {
         </dl>
       </div>}
 
-      <div className="grid grid-cols-[1fr_1fr] gap-5">
+      <details key={String(detailed)} open={detailed} className="group rounded-lg border border-line bg-surface">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold">
+          <ChevronRight size={14} className="text-muted transition group-open:rotate-90" />
+          Files and manifest <span className="font-normal text-muted">{files.length} file{files.length === 1 ? "" : "s"} · dataset.yaml (for editing the record by hand)</span>
+        </summary>
+      <div className="grid grid-cols-[1fr_1fr] gap-5 border-t border-line p-3">
         <div className="rounded-lg border border-line bg-surface">
           <div className="flex h-10 items-center justify-between border-b border-line px-3">
             <span className="text-xs font-semibold">Files</span><span className="text-[11px] text-muted">{files.length}</span>
@@ -165,12 +172,13 @@ function DatasetDetail({ d }: { d: DatasetNode }) {
                 <Button size="sm" variant="secondary" disabled={text === null || save.isPending} onClick={() => save.mutate()}>Save</Button>
               </div>
             </div>
-            <textarea className="min-h-80 flex-1 resize-none p-3 font-mono text-[11px] leading-4 outline-none"
+            <textarea className="min-h-80 flex-1 resize-y p-3 font-mono text-[11px] leading-4 outline-none"
               value={text ?? (m.data ? JSON.stringify(m.data, null, 2) : "")} onChange={(e) => setText(e.target.value)} spellCheck={false} />
             {save.isError && <p className="border-t border-line px-3 py-2 text-[11px] text-bad">{String(save.error)}</p>}
           </div>
         )}
       </div>
+      </details>
     </div>
   );
 }
@@ -305,7 +313,7 @@ function UploadDataset({ onDone }: { onDone: (id: string) => void }) {
       <Field label="Notes"><textarea className={cn(inputCls, "h-16 py-1.5")} placeholder="Provenance, licence, anything an analyst should know"
         value={f.readme} onChange={set("readme")} /></Field>
       {error && <div className="rounded-md border border-bad/20 bg-bad-soft p-2.5 text-xs text-bad"><b>Rejected.</b> {error}</div>}
-      <div className="flex justify-end border-t border-line pt-3">
+      <div className="sticky -bottom-5 -mx-5 -mb-5 flex justify-end border-t border-line bg-surface px-5 py-3">
         <Button variant="primary" disabled={!f.id || !f.material || busy || reading} onClick={submit}>{busy ? "Validating…" : "Create dataset"}</Button>
       </div>
     </div>

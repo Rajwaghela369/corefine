@@ -22,6 +22,7 @@ class ObjectStore(Protocol):
     def get(self, key: str) -> bytes: ...
     def exists(self, key: str) -> bool: ...
     def list(self, prefix: str) -> list[str]: ...
+    def delete(self, key: str) -> None: ...
     def presign_put(self, key: str, expires_s: int = 900) -> str | None: ...
     def ping(self) -> None: ...
 
@@ -51,6 +52,9 @@ class S3Store:
             return True
         except ClientError:
             return False
+
+    def delete(self, key):
+        self.s3.delete_object(Bucket=self.bucket, Key=key)
 
     def list(self, prefix):
         keys = []
@@ -92,6 +96,9 @@ class LocalStore:
 
     def exists(self, key):
         return self._path(key).is_file()
+
+    def delete(self, key):
+        self._path(key).unlink(missing_ok=True)
 
     def list(self, prefix):
         base = self.root.resolve()

@@ -21,6 +21,10 @@ async def lifespan(app: FastAPI):
 
     if settled := tools.recover_interrupted():
         logging.getLogger("corefine").warning("settled interrupted installs: %s", ", ".join(settled))
+    from app.dft import sets
+
+    if stale := sets.fail_interrupted():
+        logging.getLogger("corefine").warning("simulation sets with interrupted runs: %s", ", ".join(stale))
     yield
 
 

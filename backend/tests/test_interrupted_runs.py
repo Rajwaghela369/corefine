@@ -20,3 +20,14 @@ def test_active_runs_are_failed_on_startup():
         assert db.get(RunRow, "run-c").error is None
         assert [s.status for s in db.query(StepRow).order_by(StepRow.idx)] == ["done", "failed", "pending"]
     assert fail_interrupted_runs() == []
+
+
+def test_new_run_ids_skip_ids_with_files_in_storage(local_env):
+    from datetime import UTC, datetime
+
+    from app.api.runs import _new_run_id
+    from app.storage.objects import get_store
+
+    day = datetime.now(UTC).strftime("%Y-%m-%d")
+    get_store().put(f"runs/run-{day}-007/report.md", b"old run, its database row is gone")
+    assert _new_run_id() == f"run-{day}-008"

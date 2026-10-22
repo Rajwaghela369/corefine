@@ -1,10 +1,10 @@
 """All-electron DFT input jobs: generate exciting + Questaal inputs, check them, serve the files."""
 
 import io
-import json
 import re
 import secrets
 import zipfile
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.agents.llm import LLMError
 from app.config import get_settings
-from app.dft import execute, materials, raman, sources, structure, studies, tools, workflow
+from app.dft import execute, materials, raman, sets, sources, structure, studies, tools, workflow
 from app.dft.codes import REGISTRY
 from app.dft.codes.exciting import ExcitingSetupError
 from app.dft.codes.questaal import QuestaalSetupError
@@ -27,18 +27,20 @@ MAX_CIF_BYTES = 5 * 1024 * 1024
 
 
 def jobs_dir() -> Path:
-    d = get_settings().LOCAL_DATA_DIR / "dft"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    """Local working folders; the record of each set is in the cloud services (app/dft/sets.py)."""
+    return sets.local_root()
 
 
-def job_dir(job_id: str) -> Path:
+@contextmanager
+def job_dir(job_id: str):
+    """The set's working folder, downloaded first if only the cloud copy exists."""
     if not JOB_ID.match(job_id):
         raise HTTPException(400, detail="bad job id")
-    d = jobs_dir() / job_id
-    if not d.is_dir():
-        raise HTTPException(404, detail=f"no job {job_id}")
-    return d
+    try:
+        with sets.working(job_id) as d:
+            yield d
+    except FileNotFoundError as e:
+        raise HTTPException(404, detail=f"no job {job_id}") from e
 
 
 class JobRequest(BaseModel):
@@ -68,6 +70,7 @@ def create_job(body: JobRequest):
         req = CalcRequest.model_validate({**req.model_dump(), **overrides})
         job_id = f"dft-{datetime.now(UTC):%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
         result = prepare(req, jobs_dir() / job_id)
+        sets.settle_soon(jobs_dir() / job_id)
     except SETUP_ERRORS as e:
         raise HTTPException(400, detail=str(e)) from e
     except ValueError as e:  # pydantic validation of the merged request
@@ -77,49 +80,40 @@ def create_job(body: JobRequest):
 
 @router.get("/jobs")
 def list_jobs():
-    out = []
-    for d in sorted(jobs_dir().glob("dft-*"), reverse=True):
-        try:
-            prov = json.loads((d / "provenance.json").read_text())
-            chk = json.loads((d / "checks.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        out.append({"id": d.name, "created": prov["created"], "structure": prov["request"]["structure"],
-                    "formula": prov["cell"]["formula"], "functional": prov["request"]["functional"],
-                    "kmesh": prov["request"]["kmesh"], "codes": prov["request"]["codes"], "passed": chk["passed"],
-                    "n_checks": len(chk["results"]), "n_failed": sum(r["ok"] is False for r in chk["results"]),
-                    "n_passed": sum(r["ok"] is True for r in chk["results"])})
-    return out
+    return sets.all_listings()
+
+
+def _known(job_id: str) -> None:
+    if not JOB_ID.match(job_id):
+        raise HTTPException(400, detail="bad job id")
 
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
-    d = job_dir(job_id)
-    files = sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file())
-    plan = json.loads((d / "plan.json").read_text()) if (d / "plan.json").is_file() else None
-    summary = json.loads((d / "summary.json").read_text()) if (d / "summary.json").is_file() else None
-    return {"id": job_id, "provenance": json.loads((d / "provenance.json").read_text()),
-            "checks": json.loads((d / "checks.json").read_text()), "files": files, "runs": execute.all_states(d),
-            "plan": plan, "summary": summary, "studies": {**studies.read(d), "raman": raman.read(d)}}
+    _known(job_id)
+    if (d := sets.detail(job_id)) is None:
+        raise HTTPException(404, detail=f"no job {job_id}")
+    return d
 
 
 @router.get("/jobs/{job_id}/files/{path:path}")
 def get_file(job_id: str, path: str):
-    d = job_dir(job_id)
-    f = (d / path).resolve()
-    if not f.is_relative_to(d.resolve()) or not f.is_file():
+    _known(job_id)
+    if (data := sets.read_file(job_id, path)) is None:
         raise HTTPException(404, detail=f"{path} not found")
-    return Response(f.read_bytes(), media_type="text/plain; charset=utf-8")
+    return Response(data, media_type="text/plain; charset=utf-8")
 
 
 @router.get("/jobs/{job_id}/archive")
 def archive(job_id: str):
-    d = job_dir(job_id)
+    _known(job_id)
+    files = sets.all_files(job_id)
+    if not files:
+        raise HTTPException(404, detail=f"no job {job_id}")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in sorted(d.rglob("*")):
-            if p.is_file():
-                z.write(p, f"{job_id}/{p.relative_to(d)}")
+        for rel, data in files:
+            z.writestr(f"{job_id}/{rel}", data)
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{job_id}.zip"'})
 
@@ -163,30 +157,30 @@ def targets():
 
 @router.post("/jobs/{job_id}/runs")
 def start_run(job_id: str, body: RunBody):
-    d = job_dir(job_id)
-    try:
-        return execute.start(d, body.code, body.target)
-    except execute.ComputeConfigError as e:
-        raise HTTPException(400, detail=str(e)) from e
+    with job_dir(job_id) as d:
+        try:
+            return execute.start(d, body.code, body.target)
+        except execute.ComputeConfigError as e:
+            raise HTTPException(400, detail=str(e)) from e
 
 
 @router.post("/jobs/{job_id}/runs/{code}/import")
 async def import_results(job_id: str, code: str, files: list[UploadFile]):
     """Attach output files of a run done elsewhere (e.g. submitted by hand); they are parsed like any run."""
-    d = job_dir(job_id)
-    adapter = REGISTRY.get(code)
-    if adapter is None or not (d / code).is_dir():
-        raise HTTPException(404, detail=f"this set has no {code} inputs")
-    for f in files:
-        name = re.sub(r"[^A-Za-z0-9._-]", "_", (f.filename or "file").rsplit("/", 1)[-1])
-        (d / code / name).write_bytes(await f.read())
-    res = adapter.parse_results(d / code)
-    if res is None:
-        raise HTTPException(400, detail=f"no {adapter.label} output recognised among the uploaded files")
     from dataclasses import asdict
 
-    return execute.write_state(d, code, target="imported", kind="import", status="completed",
-                               finished=execute.now(), message=f"imported {len(files)} file(s)", results=asdict(res))
+    uploads = [(re.sub(r"[^A-Za-z0-9._-]", "_", (f.filename or "file").rsplit("/", 1)[-1]), await f.read()) for f in files]
+    with job_dir(job_id) as d:
+        adapter = REGISTRY.get(code)
+        if adapter is None or not (d / code).is_dir():
+            raise HTTPException(404, detail=f"this set has no {code} inputs")
+        for name, data in uploads:
+            (d / code / name).write_bytes(data)
+        res = adapter.parse_results(d / code)
+        if res is None:
+            raise HTTPException(400, detail=f"no {adapter.label} output recognised among the uploaded files")
+        return execute.write_state(d, code, target="imported", kind="import", status="completed",
+                                   finished=execute.now(), message=f"imported {len(files)} file(s)", results=asdict(res))
 
 
 # --- installing codes ---------------------------------------------------------------
@@ -262,10 +256,11 @@ def start_study(job_id: str, kind: str, body: StudyBody | None = None):
         raise HTTPException(404, detail="studies: convergence or eos")
     if body and body.kmesh and not all(1 <= k <= 24 for k in body.kmesh):
         raise HTTPException(400, detail="k-mesh entries must be 1..24")
-    try:
-        return studies.start(job_dir(job_id), kind, kmesh=body.kmesh if body else None)
-    except execute.ComputeConfigError as e:
-        raise HTTPException(400, detail=str(e)) from e
+    with job_dir(job_id) as d:
+        try:
+            return studies.start(d, kind, kmesh=body.kmesh if body else None)
+        except execute.ComputeConfigError as e:
+            raise HTTPException(400, detail=str(e)) from e
 
 
 @router.post("/jobs/{job_id}/studies/eos/{code}/save")
@@ -273,10 +268,12 @@ def save_eos_structure(job_id: str, code: str):
     """Store this code's equilibrium structure as a reference_structure dataset (usable by the XRD pipeline)."""
     from app.storage.imports import save_computed_structure
 
-    try:
-        m = save_computed_structure(job_dir(job_id), code)
-    except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(400, detail=str(e)) from e
+    with job_dir(job_id) as d:
+        try:
+            m = save_computed_structure(d, code)
+        except (ValueError, FileNotFoundError) as e:
+            raise HTTPException(400, detail=str(e)) from e
+    sets.settle_soon(d)  # downloaded only to read the fit: nothing runs, so the working copy goes again
     return {"dataset": m.id, "manifest": m.model_dump(exclude_none=True)}
 
 
@@ -290,10 +287,11 @@ def start_raman(job_id: str, body: RamanBody):
     """Γ-point phonons by finite displacements -> Raman/IR-active modes (group theory) and a stick spectrum."""
     if body.code not in raman.FORCE_CODES:
         raise HTTPException(400, detail=f"Raman needs a code that returns forces: {', '.join(raman.FORCE_CODES)}")
-    try:
-        return raman.start(job_dir(job_id), body.code, body.kmesh)
-    except execute.ComputeConfigError as e:
-        raise HTTPException(400, detail=str(e)) from e
+    with job_dir(job_id) as d:
+        try:
+            return raman.start(d, body.code, body.kmesh)
+        except execute.ComputeConfigError as e:
+            raise HTTPException(400, detail=str(e)) from e
 
 
 @router.get("/plan-preview")

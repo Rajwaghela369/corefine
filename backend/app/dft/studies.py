@@ -52,7 +52,11 @@ def _save(d: Path, **update) -> dict:
         st = _state(d)
         st.update(update)
         (d / "study.json").write_text(json.dumps(st, indent=2, default=str))
-        return st
+    if st.get("status") in ("done", "failed"):
+        from app.dft import sets
+
+        sets.settle_soon(d)
+    return st
 
 
 def read(set_dir: Path) -> dict:

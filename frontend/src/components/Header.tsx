@@ -14,16 +14,7 @@ const SERVICE: Record<string, { label: string; down: string }> = {
 };
 
 function Mark() {
-  // A diamond-cubic motif: the structure the first experiment measures.
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden className="text-accent">
-      <rect x="3" y="3" width="18" height="18" rx="4" fill="currentColor" />
-      <path d="M7.5 7.5h9v9h-9z" fill="none" stroke="white" strokeWidth="1.4" />
-      <circle cx="7.5" cy="7.5" r="1.6" fill="white" /><circle cx="16.5" cy="16.5" r="1.6" fill="white" />
-      <circle cx="16.5" cy="7.5" r="1.6" fill="white" /><circle cx="7.5" cy="16.5" r="1.6" fill="white" />
-      <circle cx="12" cy="12" r="1.6" fill="white" />
-    </svg>
-  );
+  return <img src="/logo-mark.png" alt="" aria-hidden className="h-6 w-auto" draggable={false} />;
 }
 
 export function Header({ title, assistantOpen, onToggleAssistant }: { title: string; assistantOpen: boolean; onToggleAssistant: () => void }) {
@@ -48,10 +39,10 @@ export function Header({ title, assistantOpen, onToggleAssistant }: { title: str
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-4 border-b border-line bg-surface px-4">
-      <div className="flex items-center gap-2.5">
+      <a href="/" title="CoRefine home" className="flex items-center gap-2.5 rounded hover:opacity-80">
         <Mark />
         <span className="text-[15px] font-semibold tracking-tight">CoRefine</span>
-      </div>
+      </a>
       <span className="h-5 w-px bg-line" />
       <h1 className="text-[13.5px] font-medium text-ink">{title}</h1>
       <div className="ml-auto flex items-center gap-3">
