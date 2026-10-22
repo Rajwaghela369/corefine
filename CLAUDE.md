@@ -1,6 +1,6 @@
 # CoRefine — notes for Claude Code sessions
 
-Read this file and `docs/SPEC.md`, then `docs/SPEC_CORRECTIONS.md` (verified deviations from the spec).
+Read this file and `docs/SPEC.md` (historical; `Readme.md` and `docs/GUIDE.md` describe what exists now), then `docs/SPEC_CORRECTIONS.md` (verified deviations from the spec).
 
 ## Layout
 - `backend/app/` — `api/` (FastAPI routers), `agents/` (llm client, planner, coder, analyst, copilot,

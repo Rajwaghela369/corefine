@@ -1,3 +1,5 @@
+"""Datasets: list the NIST standards, read their manifests and upload your own scan."""
+
 import gemmi
 import yaml
 from fastapi import APIRouter, HTTPException, UploadFile

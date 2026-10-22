@@ -16,6 +16,9 @@ CoRefine puts both in one place:
 One rule runs through all three: **language models plan and explain, code produces numbers.** No
 LLM writes an input file, and no number reaches a report unless a file or a database row backs it.
 
+> **New here?** Start with [docs/GUIDE.md](docs/GUIDE.md): the idea in one minute, what each screen is for,
+> a glossary (XRD, DFT, k-mesh, Rwp …) and answers to common questions. No physics background needed.
+
 ---
 
 ## Contents
@@ -539,6 +542,19 @@ uv run pytest -m integration       # the 3 that call real services (keys needed)
 - **No authentication.** The backend trusts whoever can reach it. Run it on your own machine, and put a
   password in front of it before exposing it anywhere.
 - **macOS and Windows** are untested; the Linux path is the one that has been run.
+
+---
+
+## Documentation map
+
+| File | For |
+|---|---|
+| [docs/GUIDE.md](docs/GUIDE.md) | newcomers: concepts, glossary, FAQ |
+| this README | every feature, the numbers, set-up and configuration |
+| [docs/SPEC_CORRECTIONS.md](docs/SPEC_CORRECTIONS.md) | what the original plan got wrong, and the design decisions |
+| [docs/SPEC.md](docs/SPEC.md) | the original hackathon plan (historical) |
+| [CLAUDE.md](CLAUDE.md) | notes for AI coding assistants working in the repo |
+| `data/*/README.md` | each dataset: what its files say and do not say |
 
 ---
 
