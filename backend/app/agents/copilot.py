@@ -9,7 +9,6 @@ import json
 from collections.abc import Iterator
 from functools import lru_cache
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel
@@ -289,9 +288,7 @@ TOOLS = [list_runs, get_run, query_metrics, read_artifact, search_knowledge, com
 def get_agent():
     from deepagents import create_deep_agent
 
-    s = get_settings()
-    model = ChatAnthropic(model=s.MODEL_FAST, max_tokens=8000, api_key=s.ANTHROPIC_API_KEY or None,
-                          thinking={"type": "adaptive"}, output_config={"effort": "low"})
+    model = llm.chat_model(get_settings().MODEL_FAST, max_tokens=8000, effort="low")
     return create_deep_agent(model=model, tools=TOOLS, system_prompt=SYSTEM, name="corefine-copilot")
 
 

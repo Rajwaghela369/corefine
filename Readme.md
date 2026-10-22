@@ -495,4 +495,4 @@ uv run pytest -m integration       # the 3 that call real services (keys needed)
 - SSSP: Prandini *et al.*, *npj Comput. Mater.* **4**, 72 (2018), Materials Cloud Archive.
 - PseudoDojo: van Setten *et al.*, *Comput. Phys. Commun.* **226**, 39 (2018).
 - Δ-test and WIEN2k reference: Lejaeghere *et al.*, *Science* **351**, aad3000 (2016), via `ase.collections.dcdft`.
-- Built on ASE, spglib, pymatgen, phonopy, gemmi, lmfit, excitingtools, FastAPI, LangGraph, React and uPlot.
+- Built on ASE, spglib, pymatgen, phonopy, gemmi, lmfit, excitingtools, FastAPI, LangChain, LangGraph, React and uPlot.

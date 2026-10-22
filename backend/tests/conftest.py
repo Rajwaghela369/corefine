@@ -17,7 +17,7 @@ def _clear_caches():
     from app.retrieval import index
     from app.storage import objects
 
-    for f in (get_settings, db.get_engine, db.get_sessionmaker, objects.get_store, llm.get_client,
+    for f in (get_settings, db.get_engine, db.get_sessionmaker, objects.get_store, llm.chat_model,
               index.get_qdrant, copilot.get_agent, skills.load):
         f.cache_clear()
 

@@ -79,3 +79,8 @@ certification does. This is a hypothesis, not tested.
 - **Theory ↔ Experiment removed** (2026-10-22, on request): the `/bridge` endpoints, the comparison page and the
   co-pilot's `theory_vs_experiment` tool are gone. The per-run reasoning story used by the XRD *Reasoning* tab moved
   to `app/orchestration/story.py`; the Storage pattern comparison (`/xrd/compare`) stays.
+- **LangChain and LangGraph throughout** (2026-10-22): every Claude call is a LangChain `ChatAnthropic` model from
+  `app/agents/llm.py` (structured output via `with_structured_output(method="json_schema")`, with thinking, effort,
+  streaming and server-side fallbacks as before). GSAS-II/MAUD runs and the DFT workflow became LangGraph graphs like
+  the agent run graph; the DFT workflow pauses before its runs (checkpointer) and resumes them in the background.
+  The raw Anthropic SDK is used only for the token-free health check and its exception types.
